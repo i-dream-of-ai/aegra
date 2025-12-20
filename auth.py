@@ -49,21 +49,28 @@ elif AUTH_TYPE == "custom":
     @auth.authenticate
     async def authenticate(headers: dict[str, str]) -> Auth.types.MinimalUserDict:
         """
-        Custom authentication handler.
+        Custom authentication handler for Supabase JWT tokens.
 
-        Modify this function to integrate with your authentication service.
+        Extracts:
+        - Authorization Bearer token (Supabase access_token)
+        - X-User-Id header (Supabase user ID)
+        - X-Project-Id header (optional project context)
         """
-        # Extract authorization header
-        authorization = (
-            headers.get("authorization")
-            or headers.get("Authorization")
-            or headers.get(b"authorization")
-            or headers.get(b"Authorization")
-        )
 
-        # Handle bytes headers
-        if isinstance(authorization, bytes):
-            authorization = authorization.decode("utf-8")
+        def get_header(name: str) -> str | None:
+            """Get header value, handling both string and bytes keys."""
+            value = (
+                headers.get(name.lower())
+                or headers.get(name)
+                or headers.get(name.lower().encode())
+                or headers.get(name.encode())
+            )
+            if isinstance(value, bytes):
+                return value.decode("utf-8")
+            return value
+
+        # Extract authorization header
+        authorization = get_header("authorization")
 
         if not authorization:
             logger.warning("Missing Authorization header")
@@ -71,30 +78,39 @@ elif AUTH_TYPE == "custom":
                 status_code=401, detail="Authorization header required"
             )
 
-        # Development token for testing
-        if authorization == "Bearer dev-token":
-            return {
-                "identity": "dev-user",
-                "display_name": "Development User",
-                "email": "dev@example.com",
-                "permissions": ["admin"],
-                "org_id": "dev-org",
-                "is_authenticated": True,
-            }
-
-        # Example: Simple API key validation (replace with your logic)
-        if authorization.startswith("Bearer "):
-            # TODO: Replace with your auth service integration
-            logger.warning("Invalid token")
+        if not authorization.startswith("Bearer "):
             raise Auth.exceptions.HTTPException(
-                status_code=401, detail="Invalid authentication token"
+                status_code=401,
+                detail="Invalid authorization format. Expected 'Bearer <token>'",
             )
 
-        # Reject requests without proper format
-        raise Auth.exceptions.HTTPException(
-            status_code=401,
-            detail="Invalid authorization format. Expected 'Bearer <token>'",
-        )
+        # Extract access token from Bearer header
+        access_token = authorization[7:]  # Remove "Bearer " prefix
+
+        # Get user ID from header (set by Next.js proxy from Supabase session)
+        user_id = get_header("x-user-id")
+        if not user_id:
+            logger.warning("Missing X-User-Id header")
+            raise Auth.exceptions.HTTPException(
+                status_code=401, detail="X-User-Id header required"
+            )
+
+        # Get optional project ID from header
+        project_id = get_header("x-project-id")
+
+        # Get optional user email from header
+        user_email = get_header("x-user-email")
+
+        # Return user data including access token for graph middleware
+        return {
+            "identity": user_id,
+            "display_name": user_email or user_id,
+            "email": user_email,
+            "is_authenticated": True,
+            # Include access_token and project_id for graph context
+            "access_token": access_token,
+            "project_db_id": project_id,
+        }
 
     @auth.on
     async def authorize(
