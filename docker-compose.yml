@@ -23,7 +23,7 @@ services:
       - "${PORT:-8000}:${PORT:-8000}"
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/aegra
-      - AUTH_TYPE=noop
+      - AUTH_TYPE=custom
       - DEBUG=true
       - PORT=${PORT:-8000}
     depends_on:
