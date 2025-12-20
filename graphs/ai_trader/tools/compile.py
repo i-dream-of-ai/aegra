@@ -53,28 +53,34 @@ async def create_compile(
             state = status.get("state", "Unknown")
 
         if state == "BuildSuccess":
-            return json.dumps({
-                "success": True,
-                "compile_id": compile_id,
-                "state": state,
-                "message": "Compilation successful. Ready for backtest or optimization.",
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "message": "Compilation successful. Ready for backtest or optimization.",
+                }
+            )
         elif state == "BuildError":
             logs = result.get("logs", [])
-            return json.dumps({
-                "error": True,
-                "compile_id": compile_id,
-                "state": state,
-                "logs": logs[:20] if logs else [],
-                "message": "Compilation failed.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "logs": logs[:20] if logs else [],
+                    "message": "Compilation failed.",
+                }
+            )
         else:
-            return json.dumps({
-                "success": True,
-                "compile_id": compile_id,
-                "state": state,
-                "message": f"Compile created with state: {state}",
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "message": f"Compile created with state: {state}",
+                }
+            )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to compile: {str(e)}"})
@@ -104,11 +110,16 @@ async def read_compile(
         state = result.get("state", "Unknown")
         logs = result.get("logs", [])
 
-        return json.dumps({
-            "compile_id": compile_id,
-            "state": state,
-            "logs": logs[:20] if logs else [],
-        }, indent=2)
+        return json.dumps(
+            {
+                "compile_id": compile_id,
+                "state": state,
+                "logs": logs[:20] if logs else [],
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read compile: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read compile: {str(e)}"}
+        )

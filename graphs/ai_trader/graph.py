@@ -42,6 +42,7 @@ logger = structlog.getLogger(__name__)
 # RUNTIME CONTEXT SCHEMA
 # =============================================================================
 
+
 @dataclass
 class AgentContext:
     """
@@ -50,6 +51,7 @@ class AgentContext:
     This is injected by Aegra when invoking the graph and is accessible
     in middleware via request.runtime.context
     """
+
     # User authentication
     access_token: str | None = None
     user_id: str | None = None
@@ -274,30 +276,64 @@ If the code looks good, say so briefly. Don't nitpick.
 
 class AgentState(TypedDict):
     """Agent state with message history."""
+
     messages: Annotated[list[BaseMessage], add_messages]
 
 
 # All 44 tools
 TOOLS = [
     # Files (5)
-    create_file, read_file, update_file, rename_file, delete_file,
+    create_file,
+    read_file,
+    update_file,
+    rename_file,
+    delete_file,
     # Compile (2)
-    create_compile, read_compile,
+    create_compile,
+    read_compile,
     # Backtest (8)
-    create_backtest, read_backtest, read_backtest_chart, read_backtest_orders,
-    read_backtest_insights, list_backtests, update_backtest, delete_backtest,
+    create_backtest,
+    read_backtest,
+    read_backtest_chart,
+    read_backtest_orders,
+    read_backtest_insights,
+    list_backtests,
+    update_backtest,
+    delete_backtest,
     # Optimization (7)
-    estimate_optimization, create_optimization, read_optimization, list_optimizations,
-    update_optimization, abort_optimization, delete_optimization,
+    estimate_optimization,
+    create_optimization,
+    read_optimization,
+    list_optimizations,
+    update_optimization,
+    abort_optimization,
+    delete_optimization,
     # Object Store (4)
-    upload_object, read_object_properties, list_object_store_files, delete_object,
+    upload_object,
+    read_object_properties,
+    list_object_store_files,
+    delete_object,
     # Composite (4)
-    compile_and_backtest, compile_and_optimize, update_and_run_backtest, edit_and_run_backtest,
+    compile_and_backtest,
+    compile_and_optimize,
+    update_and_run_backtest,
+    edit_and_run_backtest,
     # AI Services (8)
-    check_initialization_errors, complete_code, enhance_error_message, check_syntax,
-    update_code_to_pep8, search_quantconnect, search_local_algorithms, get_algorithm_code,
+    check_initialization_errors,
+    complete_code,
+    enhance_error_message,
+    check_syntax,
+    update_code_to_pep8,
+    search_quantconnect,
+    search_local_algorithms,
+    get_algorithm_code,
     # Misc (6)
-    wait, get_code_versions, get_code_version, read_project_nodes, update_project_nodes, read_lean_versions,
+    wait,
+    get_code_versions,
+    get_code_version,
+    read_project_nodes,
+    update_project_nodes,
+    read_lean_versions,
 ]
 
 
@@ -309,7 +345,9 @@ CLAUDE_ONLY_CONTENT_TYPES = {"thinking", "redacted_thinking"}
 TOOL_USE_FIELDS_TO_REMOVE = {"caller"}
 
 
-def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> list[BaseMessage]:
+def sanitize_messages(
+    messages: list[BaseMessage], is_claude: bool = True
+) -> list[BaseMessage]:
     """
     Sanitize messages before sending to model:
     1. Strip Claude thinking blocks when sending to non-Claude models
@@ -327,9 +365,10 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
         content = msg.content
 
         is_empty = (
-            not content or content == "" or
-            (isinstance(content, str) and content.strip() == "") or
-            (isinstance(content, list) and len(content) == 0)
+            not content
+            or content == ""
+            or (isinstance(content, str) and content.strip() == "")
+            or (isinstance(content, list) and len(content) == 0)
         )
 
         if is_empty:
@@ -349,14 +388,21 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
                     new_content.append(block)
                     continue
 
-                if should_strip_thinking and block.get("type") in CLAUDE_ONLY_CONTENT_TYPES:
+                if (
+                    should_strip_thinking
+                    and block.get("type") in CLAUDE_ONLY_CONTENT_TYPES
+                ):
                     modified = True
                     continue
 
                 if block.get("type") == "tool_use":
                     needs_clean = any(f in block for f in TOOL_USE_FIELDS_TO_REMOVE)
                     if needs_clean:
-                        block = {k: v for k, v in block.items() if k not in TOOL_USE_FIELDS_TO_REMOVE}
+                        block = {
+                            k: v
+                            for k, v in block.items()
+                            if k not in TOOL_USE_FIELDS_TO_REMOVE
+                        }
                         modified = True
 
                 new_content.append(block)
@@ -376,7 +422,9 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
     return sanitized
 
 
-def patch_dangling_tool_calls(messages: list[BaseMessage]) -> tuple[list[BaseMessage], list[dict]]:
+def patch_dangling_tool_calls(
+    messages: list[BaseMessage],
+) -> tuple[list[BaseMessage], list[dict]]:
     """Add synthetic ToolMessage for tool_calls without responses."""
     if not messages:
         return messages, []
@@ -393,12 +441,16 @@ def patch_dangling_tool_calls(messages: list[BaseMessage]) -> tuple[list[BaseMes
             for tc in msg.tool_calls or []:
                 tc_id = tc.get("id")
                 if tc_id and tc_id not in responded_ids:
-                    patches.append(ToolMessage(content="[interrupted]", tool_call_id=tc_id))
-                    interrupted_tools.append({
-                        "id": tc_id,
-                        "name": tc.get("name"),
-                        "args": tc.get("args", {}),
-                    })
+                    patches.append(
+                        ToolMessage(content="[interrupted]", tool_call_id=tc_id)
+                    )
+                    interrupted_tools.append(
+                        {
+                            "id": tc_id,
+                            "name": tc.get("name"),
+                            "args": tc.get("args", {}),
+                        }
+                    )
                     responded_ids.add(tc_id)
 
     if patches:
@@ -443,7 +495,9 @@ def clear_old_tool_outputs(
     new_messages = []
     for i, msg in enumerate(messages):
         if i in indices_to_replace and isinstance(msg, ToolMessage):
-            new_messages.append(ToolMessage(content="[cleared]", tool_call_id=msg.tool_call_id))
+            new_messages.append(
+                ToolMessage(content="[cleared]", tool_call_id=msg.tool_call_id)
+            )
         else:
             new_messages.append(msg)
     return new_messages
@@ -485,17 +539,23 @@ async def fetch_agent_config(project_db_id: str, access_token: str) -> dict | No
                 if data and len(data) > 0:
                     config = data[0].get("agent_config")
                     _agent_config_cache[cache_key] = config
-                    logger.info(f"[graph] Loaded agent_config for project {project_db_id}")
+                    logger.info(
+                        f"[graph] Loaded agent_config for project {project_db_id}"
+                    )
                     return config
             else:
-                logger.warning(f"[graph] Failed to fetch agent_config: {response.status_code}")
+                logger.warning(
+                    f"[graph] Failed to fetch agent_config: {response.status_code}"
+                )
     except Exception as e:
         logger.error(f"[graph] Error fetching agent_config: {e}")
 
     return None
 
 
-def get_config_value(agent_config: dict | None, agent_key: str, field: str, default: Any = None) -> Any:
+def get_config_value(
+    agent_config: dict | None, agent_key: str, field: str, default: Any = None
+) -> Any:
     """Get a value from agent_config for a specific agent."""
     if not agent_config:
         return default
@@ -523,8 +583,13 @@ def load_dynamic_model(model_name: str | None, thinking_budget: int | None = Non
 
     # Add thinking budget for Claude models that support it
     if provider == "anthropic" and thinking_budget and thinking_budget > 0:
-        if any(x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]):
-            model_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+        if any(
+            x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]
+        ):
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_budget,
+            }
             logger.info(f"[graph] Enabled thinking with budget {thinking_budget}")
 
     logger.info(f"[graph] Loading model: {model_name} (provider: {provider})")
@@ -575,9 +640,12 @@ async def subconscious_injection_middleware(
         )
 
         if subconscious_context:
-            current_prompt = request.system_message.content if request.system_message else ""
+            current_prompt = (
+                request.system_message.content if request.system_message else ""
+            )
             new_prompt = f"{current_prompt}\n\n{subconscious_context}"
             from langchain_core.messages import SystemMessage
+
             request = request.override(system_message=SystemMessage(content=new_prompt))
             logger.info(f"[subconscious] Injected {len(subconscious_context)} chars")
 
@@ -597,7 +665,11 @@ async def dynamic_config_middleware(
     - Custom system prompt
     - Custom model (with thinking budget if set)
     """
-    ctx: AgentContext | None = getattr(request.runtime, "context", None) if hasattr(request, "runtime") else None
+    ctx: AgentContext | None = (
+        getattr(request.runtime, "context", None)
+        if hasattr(request, "runtime")
+        else None
+    )
 
     if ctx is None:
         logger.debug("[dynamic_config] No context, using defaults")
@@ -627,6 +699,7 @@ async def dynamic_config_middleware(
     # Override system prompt if custom one is set
     if custom_prompt and custom_prompt.strip():
         from langchain_core.messages import SystemMessage
+
         overrides["system_message"] = SystemMessage(content=custom_prompt)
         logger.info("[dynamic_config] Using custom system prompt")
 
@@ -672,11 +745,12 @@ async def message_sanitization_middleware(
 # HITL CONFIGURATION
 # =============================================================================
 
+
 def build_hitl_interrupt_config() -> dict:
     """Build interrupt config for all tools."""
     interrupt_on = {}
     for tool in TOOLS:
-        tool_name = tool.name if hasattr(tool, 'name') else str(tool)
+        tool_name = tool.name if hasattr(tool, "name") else str(tool)
         interrupt_on[tool_name] = {
             "allowed_decisions": ["approve", "edit", "reject"],
         }
@@ -686,6 +760,7 @@ def build_hitl_interrupt_config() -> dict:
 # =============================================================================
 # MAIN AGENT (Shooby Dooby)
 # =============================================================================
+
 
 def create_main_agent():
     """
@@ -730,13 +805,18 @@ def create_main_agent():
 # REVIEWER AGENT (Doubtful Deacon)
 # =============================================================================
 
+
 @wrap_model_call
 async def reviewer_dynamic_config_middleware(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """Dynamic config middleware for reviewer agent - uses 'reviewer' config key."""
-    ctx: AgentContext | None = getattr(request.runtime, "context", None) if hasattr(request, "runtime") else None
+    ctx: AgentContext | None = (
+        getattr(request.runtime, "context", None)
+        if hasattr(request, "runtime")
+        else None
+    )
 
     if ctx is None or not ctx.project_db_id or not ctx.access_token:
         return await handler(request)
@@ -754,6 +834,7 @@ async def reviewer_dynamic_config_middleware(
 
     if custom_prompt and custom_prompt.strip():
         from langchain_core.messages import SystemMessage
+
         overrides["system_message"] = SystemMessage(content=custom_prompt)
 
     if model_name:

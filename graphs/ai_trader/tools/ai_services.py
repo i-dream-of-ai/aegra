@@ -38,10 +38,12 @@ async def check_initialization_errors(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to check initialization errors: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to check initialization errors: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -77,10 +79,12 @@ async def complete_code(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to get code completion: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to get code completion: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -116,10 +120,12 @@ async def enhance_error_message(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to enhance error message: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to enhance error message: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -149,10 +155,12 @@ async def check_syntax(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to check syntax: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to check syntax: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -182,10 +190,12 @@ async def update_code_to_pep8(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to format code to PEP8: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to format code to PEP8: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -215,10 +225,12 @@ async def search_quantconnect(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to search: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to search: {str(e)}",
+            }
+        )
 
 
 async def generate_embedding(text: str) -> list[float]:
@@ -269,35 +281,42 @@ async def search_local_algorithms(
 
         results = results or []
 
-        return json.dumps({
-            "searchInfo": {
-                "query": query,
-                "resultsReturned": len(results),
-                "maxResults": effective_limit,
-                "hint": (
-                    f"Found {len(results)} matching algorithms. Use get_algorithm_code with ID to get full code."
-                    if results
-                    else "No matching algorithms. Try different keywords."
-                ),
+        return json.dumps(
+            {
+                "searchInfo": {
+                    "query": query,
+                    "resultsReturned": len(results),
+                    "maxResults": effective_limit,
+                    "hint": (
+                        f"Found {len(results)} matching algorithms. Use get_algorithm_code with ID to get full code."
+                        if results
+                        else "No matching algorithms. Try different keywords."
+                    ),
+                },
+                "results": [
+                    {
+                        "rank": i + 1,
+                        "id": r.get("id"),
+                        "file_path": r.get("file_path"),
+                        "summary": r.get("summary"),
+                        "tags": r.get("tags"),
+                        "similarity": f"{r.get('similarity', 0) * 100:.1f}%"
+                        if r.get("similarity")
+                        else None,
+                    }
+                    for i, r in enumerate(results)
+                ],
             },
-            "results": [
-                {
-                    "rank": i + 1,
-                    "id": r.get("id"),
-                    "file_path": r.get("file_path"),
-                    "summary": r.get("summary"),
-                    "tags": r.get("tags"),
-                    "similarity": f"{r.get('similarity', 0) * 100:.1f}%" if r.get("similarity") else None,
-                }
-                for i, r in enumerate(results)
-            ],
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to search: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to search: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -312,17 +331,21 @@ async def get_algorithm_code(algorithm_id: str) -> str:
     """
     try:
         if not algorithm_id:
-            return json.dumps({
-                "error": True,
-                "message": "algorithm_id is required.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "algorithm_id is required.",
+                }
+            )
 
         # Determine if it's a UUID or file path
-        is_uuid = bool(re.match(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            algorithm_id,
-            re.IGNORECASE,
-        ))
+        is_uuid = bool(
+            re.match(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                algorithm_id,
+                re.IGNORECASE,
+            )
+        )
 
         # Build query params
         params = {
@@ -339,10 +362,12 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         data = await client.select("algorithm_knowledge_base", params)
 
         if not data:
-            return json.dumps({
-                "error": True,
-                "message": f"Algorithm not found: {algorithm_id}",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"Algorithm not found: {algorithm_id}",
+                }
+            )
 
         algorithm = data[0]
         code = algorithm.get("code", "")
@@ -352,16 +377,21 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         if len(code) > max_chars:
             code = code[:max_chars] + "\n\n... [CODE TRUNCATED - File too large]"
 
-        return json.dumps({
-            "id": algorithm.get("id"),
-            "file_path": algorithm.get("file_path"),
-            "summary": algorithm.get("summary"),
-            "tags": algorithm.get("tags"),
-            "code": code,
-        }, indent=2)
+        return json.dumps(
+            {
+                "id": algorithm.get("id"),
+                "file_path": algorithm.get("file_path"),
+                "summary": algorithm.get("summary"),
+                "tags": algorithm.get("tags"),
+                "code": code,
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to get code: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to get code: {str(e)}",
+            }
+        )

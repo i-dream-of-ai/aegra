@@ -42,7 +42,12 @@ async def estimate_optimization(
             return json.dumps({"error": True, "message": "No project context."})
 
         qc_params = [
-            {"name": p["name"], "min": p.get("min", 0), "max": p.get("max", 100), "step": p.get("step", 1)}
+            {
+                "name": p["name"],
+                "min": p.get("min", 0),
+                "max": p.get("max", 100),
+                "step": p.get("step", 1),
+            }
             for p in parameters
         ]
 
@@ -65,15 +70,18 @@ async def estimate_optimization(
         )
 
         estimate = result.get("estimate", {})
-        return json.dumps({
-            "success": True,
-            "compile_id": compile_id,
-            "estimated_backtests": estimated_runs,
-            "parameters": parameters,
-            "node_type": node_type,
-            "parallel_nodes": parallel_nodes,
-            "qc_estimate": estimate,
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "compile_id": compile_id,
+                "estimated_backtests": estimated_runs,
+                "parameters": parameters,
+                "node_type": node_type,
+                "parallel_nodes": parallel_nodes,
+                "qc_estimate": estimate,
+            },
+            indent=2,
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to estimate: {str(e)}"})
@@ -111,10 +119,12 @@ async def create_optimization(
             return json.dumps({"error": True, "message": "No project context."})
 
         if len(parameters) > 3:
-            return json.dumps({
-                "error": True,
-                "message": "QC limits optimizations to 3 parameters max.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "QC limits optimizations to 3 parameters max.",
+                }
+            )
 
         # Transform constraint operators
         operator_map = {
@@ -126,13 +136,21 @@ async def create_optimization(
             "notequal": "NotEqual",
         }
         transformed_constraints = []
-        for c in (constraints or []):
-            op = c.get("operator", "").lower().replace("_", "").replace("-", "").replace(" ", "")
-            transformed_constraints.append({
-                "target": c["target"],
-                "operator": operator_map.get(op, c["operator"]),
-                "targetValue": c["targetValue"],
-            })
+        for c in constraints or []:
+            op = (
+                c.get("operator", "")
+                .lower()
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "")
+            )
+            transformed_constraints.append(
+                {
+                    "target": c["target"],
+                    "operator": operator_map.get(op, c["operator"]),
+                    "targetValue": c["targetValue"],
+                }
+            )
 
         result = await qc_request(
             "/optimizations/create",
@@ -152,7 +170,9 @@ async def create_optimization(
             },
         )
 
-        opt_id = result.get("optimizations", [{}])[0].get("optimizationId") or result.get("optimizationId")
+        opt_id = result.get("optimizations", [{}])[0].get(
+            "optimizationId"
+        ) or result.get("optimizationId")
 
         # Calculate estimated runs
         estimated_runs = 1
@@ -160,20 +180,25 @@ async def create_optimization(
             steps = ((p.get("max", 100) - p.get("min", 0)) // p.get("step", 1)) + 1
             estimated_runs *= steps
 
-        return json.dumps({
-            "success": True,
-            "optimization_id": opt_id,
-            "optimization_name": optimization_name,
-            "compile_id": compile_id,
-            "target": target,
-            "target_to": target_to,
-            "estimated_backtests": estimated_runs,
-            "status": "running",
-            "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "optimization_id": opt_id,
+                "optimization_name": optimization_name,
+                "compile_id": compile_id,
+                "target": target,
+                "target_to": target_to,
+                "estimated_backtests": estimated_runs,
+                "status": "running",
+                "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to create optimization: {str(e)}"}
+        )
 
 
 # Statistics array indices from QC API
@@ -247,15 +272,17 @@ async def read_optimization(
         for i, bt in enumerate(page_results):
             stats = bt.get("statistics")  # Array of numbers by index
             params = bt.get("parameters", {})
-            results.append({
-                "rank": start + i + 1,
-                "parameters": params,
-                "net_profit": _get_stat(stats, STAT_NET_PROFIT),
-                "cagr": _get_stat(stats, STAT_CAGR),
-                "sharpe_ratio": _get_stat(stats, STAT_SHARPE),
-                "max_drawdown": _get_stat(stats, STAT_DRAWDOWN),
-                "win_rate": _get_stat(stats, STAT_WIN_RATE),
-            })
+            results.append(
+                {
+                    "rank": start + i + 1,
+                    "parameters": params,
+                    "net_profit": _get_stat(stats, STAT_NET_PROFIT),
+                    "cagr": _get_stat(stats, STAT_CAGR),
+                    "sharpe_ratio": _get_stat(stats, STAT_SHARPE),
+                    "max_drawdown": _get_stat(stats, STAT_DRAWDOWN),
+                    "win_rate": _get_stat(stats, STAT_WIN_RATE),
+                }
+            )
 
         # Best result
         best = None
@@ -269,24 +296,29 @@ async def read_optimization(
                 "sharpe_ratio": _get_stat(best_stats, STAT_SHARPE),
             }
 
-        return json.dumps({
-            "optimization_id": optimization_id,
-            "name": opt.get("name", "Unknown"),
-            "status": opt.get("status", "Unknown"),
-            "progress": f"{(opt.get('progress', 0) * 100):.1f}%",
-            "best_result": best,
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "optimization_id": optimization_id,
+                "name": opt.get("name", "Unknown"),
+                "status": opt.get("status", "Unknown"),
+                "progress": f"{(opt.get('progress', 0) * 100):.1f}%",
+                "best_result": best,
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "results": results,
             },
-            "results": results,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read optimization: {str(e)}"}
+        )
 
 
 @tool
@@ -322,26 +354,33 @@ async def list_optimizations(
 
         optimizations = []
         for opt in page_opts:
-            optimizations.append({
-                "optimization_id": opt.get("optimizationId"),
-                "name": opt.get("name", "Unknown"),
-                "status": opt.get("status", "Unknown"),
-                "created": opt.get("created"),
-            })
+            optimizations.append(
+                {
+                    "optimization_id": opt.get("optimizationId"),
+                    "name": opt.get("name", "Unknown"),
+                    "status": opt.get("status", "Unknown"),
+                    "created": opt.get("created"),
+                }
+            )
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "optimizations": optimizations,
             },
-            "optimizations": optimizations,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list optimizations: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to list optimizations: {str(e)}"}
+        )
 
 
 @tool
@@ -371,14 +410,18 @@ async def update_optimization(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f'Updated optimization name to "{name}"',
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f'Updated optimization name to "{name}"',
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update optimization: {str(e)}"}
+        )
 
 
 @tool
@@ -402,14 +445,18 @@ async def abort_optimization(
             {"projectId": qc_project_id, "optimizationId": optimization_id},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Aborted optimization {optimization_id}. Completed backtests are preserved.",
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Aborted optimization {optimization_id}. Completed backtests are preserved.",
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to abort optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to abort optimization: {str(e)}"}
+        )
 
 
 @tool
@@ -433,11 +480,15 @@ async def delete_optimization(
             {"projectId": qc_project_id, "optimizationId": optimization_id},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Deleted optimization {optimization_id} and all results.",
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Deleted optimization {optimization_id} and all results.",
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to delete optimization: {str(e)}"}
+        )

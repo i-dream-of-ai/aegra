@@ -14,7 +14,9 @@ from langchain_core.runnables import RunnableConfig
 
 def get_supabase_config() -> tuple[str, str]:
     """Get Supabase URL and service role key from environment."""
-    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get(
+        "NEXT_PUBLIC_SUPABASE_URL"
+    )
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     return supabase_url or "", supabase_key or ""
 
@@ -63,7 +65,11 @@ class SupabaseClient:
         else:
             self.token = get_user_token(config) or self.service_role_key
 
-        self.anon_key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or ""
+        self.anon_key = (
+            os.environ.get("SUPABASE_ANON_KEY")
+            or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            or ""
+        )
 
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
@@ -212,6 +218,8 @@ class SupabaseClient:
         url = f"{self.supabase_url}/rest/v1/rpc/{function_name}"
 
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=params or {}, headers=self._headers())
+            response = await client.post(
+                url, json=params or {}, headers=self._headers()
+            )
             response.raise_for_status()
             return response.json()

@@ -113,7 +113,9 @@ class SubconsciousMiddleware:
                 return None
 
             # PHASE 2: Retrieval
-            self.emit(SubconsciousEvent(type="subconscious_thinking", stage="retrieving"))
+            self.emit(
+                SubconsciousEvent(type="subconscious_thinking", stage="retrieving")
+            )
 
             skills = []
 
@@ -153,7 +155,9 @@ class SubconsciousMiddleware:
                 return None
 
             # PHASE 3: Synthesis
-            self.emit(SubconsciousEvent(type="subconscious_thinking", stage="synthesizing"))
+            self.emit(
+                SubconsciousEvent(type="subconscious_thinking", stage="synthesizing")
+            )
 
             result = await synthesize_context(
                 skills=unique_skills,
@@ -167,15 +171,17 @@ class SubconsciousMiddleware:
             self.state.injection_count += 1
 
             # Emit injection event
-            self.emit(SubconsciousEvent(
-                type="instinct_injection",
-                data={
-                    "skillIds": result.skill_ids,
-                    "tokenCount": result.token_count,
-                    "driftScore": result.drift_score,
-                    "synthesisMethod": result.synthesis_method,
-                },
-            ))
+            self.emit(
+                SubconsciousEvent(
+                    type="instinct_injection",
+                    data={
+                        "skillIds": result.skill_ids,
+                        "tokenCount": result.token_count,
+                        "driftScore": result.drift_score,
+                        "synthesisMethod": result.synthesis_method,
+                    },
+                )
+            )
 
             self.emit(SubconsciousEvent(type="subconscious_thinking", stage="done"))
 
@@ -207,7 +213,9 @@ class SubconsciousMiddleware:
                     return " ".join(text_parts)
         return None
 
-    def _extract_context(self, messages: List[BaseMessage], max_chars: int = 2000) -> str:
+    def _extract_context(
+        self, messages: List[BaseMessage], max_chars: int = 2000
+    ) -> str:
         """Extract conversation context for planning."""
         parts = []
         total_chars = 0
@@ -228,7 +236,7 @@ class SubconsciousMiddleware:
 
             if text:
                 if total_chars + len(text) > max_chars:
-                    text = text[:max_chars - total_chars]
+                    text = text[: max_chars - total_chars]
                 parts.insert(0, f"{role}: {text}")
                 total_chars += len(text)
                 if total_chars >= max_chars:
@@ -249,10 +257,12 @@ class SubconsciousMiddleware:
             else:
                 role = "unknown"
 
-            result.append({
-                "role": role,
-                "content": msg.content,
-            })
+            result.append(
+                {
+                    "role": role,
+                    "content": msg.content,
+                }
+            )
         return result
 
 

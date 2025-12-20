@@ -64,7 +64,11 @@ async def synthesize_context(
         )
 
     # For 1-2 skills with high relevance, use template (no LLM needed)
-    if len(skills) <= 2 and all(s.relevance_score > 0.7 for s in skills) and not use_llm:
+    if (
+        len(skills) <= 2
+        and all(s.relevance_score > 0.7 for s in skills)
+        and not use_llm
+    ):
         return _template_synthesis(skills)
 
     # Use LLM for more complex synthesis
@@ -110,15 +114,19 @@ async def _llm_synthesis(
     )
 
     # Format skills for LLM
-    skills_text = "\n\n".join([
-        f"SKILL {i+1} (id: {s.id}, relevance: {s.relevance_score:.2f}):\n{s.content}"
-        for i, s in enumerate(skills[:7])  # Max 7 skills
-    ])
+    skills_text = "\n\n".join(
+        [
+            f"SKILL {i + 1} (id: {s.id}, relevance: {s.relevance_score:.2f}):\n{s.content}"
+            for i, s in enumerate(skills[:7])  # Max 7 skills
+        ]
+    )
 
     try:
-        response = await model.ainvoke([
-            SystemMessage(content=SYNTHESIZER_PROMPT),
-            HumanMessage(content=f"""USER INTENT: {user_intent}
+        response = await model.ainvoke(
+            [
+                SystemMessage(content=SYNTHESIZER_PROMPT),
+                HumanMessage(
+                    content=f"""USER INTENT: {user_intent}
 
 CONVERSATION CONTEXT:
 {conversation_context[:500]}
@@ -126,8 +134,10 @@ CONVERSATION CONTEXT:
 RETRIEVED SKILLS:
 {skills_text}
 
-Synthesize the most relevant skills into actionable context. Output JSON."""),
-        ])
+Synthesize the most relevant skills into actionable context. Output JSON."""
+                ),
+            ]
+        )
 
         # Parse JSON response
         content = response.content

@@ -3,6 +3,7 @@ QuantConnect Tools - Complete Tool Suite
 
 All tools for interacting with QuantConnect API.
 """
+
 # Path setup for Aegra compatibility
 import sys
 from pathlib import Path
