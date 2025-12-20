@@ -11,6 +11,23 @@ class User(BaseModel):
     permissions: list[str] = []
     org_id: str | None = None
     is_authenticated: bool = True
+    # Additional fields for graph context
+    access_token: str | None = None
+    project_db_id: str | None = None
+    email: str | None = None
+
+    def to_dict(self) -> dict:
+        """Return user data as dict for graph context injection."""
+        return {
+            "identity": self.identity,
+            "display_name": self.display_name,
+            "permissions": self.permissions,
+            "org_id": self.org_id,
+            "is_authenticated": self.is_authenticated,
+            "access_token": self.access_token,
+            "project_db_id": self.project_db_id,
+            "email": self.email,
+        }
 
 
 class AuthContext(BaseModel):

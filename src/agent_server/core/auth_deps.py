@@ -41,6 +41,10 @@ def get_current_user(request: Request) -> User:
         permissions=user_data.get("permissions", []),
         org_id=user_data.get("org_id"),
         is_authenticated=user_data.get("is_authenticated", True),
+        # Pass through auth fields for graph context
+        access_token=user_data.get("access_token"),
+        project_db_id=user_data.get("project_db_id"),
+        email=user_data.get("email"),
     )
 
 

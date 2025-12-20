@@ -979,6 +979,18 @@ async def execute_run_async(
             run_id, thread_id, user, config or {}, checkpoint
         )
 
+        # Build graph context from user auth data
+        # This context is passed to graph.astream() and accessible via request.runtime.context
+        # in middleware (matches AgentContext dataclass in graph.py)
+        graph_context = context.copy() if context else {}
+        if user:
+            user_dict = user.to_dict() if hasattr(user, "to_dict") else {}
+            # Extract auth fields for AgentContext
+            graph_context.setdefault("access_token", user_dict.get("access_token"))
+            graph_context.setdefault("user_id", user.identity)
+            graph_context.setdefault("project_db_id", user_dict.get("project_db_id"))
+            graph_context.setdefault("subconscious_enabled", True)
+
         # Handle human-in-the-loop fields
         if interrupt_before is not None:
             run_config["interrupt_before"] = (
@@ -1024,7 +1036,7 @@ async def execute_run_async(
                 input_data=execution_input,
                 config=run_config,
                 stream_mode=stream_mode_list,
-                context=context,
+                context=graph_context,
                 subgraphs=subgraphs,
                 on_checkpoint=lambda _: None,  # Can add checkpoint handling if needed
                 on_task_result=lambda _: None,  # Can add task result handling if needed
