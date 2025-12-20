@@ -176,6 +176,25 @@ async def create_optimization(
         return json.dumps({"error": True, "message": f"Failed to create optimization: {str(e)}"})
 
 
+# Statistics array indices from QC API
+# [alpha, annual_std_dev, annual_variance, avg_loss%, avg_win%, beta, CAGR%, drawdown%,
+#  capacity, expectancy, info_ratio, loss_rate%, net_profit%, prob_sharpe, profit_loss_ratio,
+#  sharpe_ratio, total_fees, total_orders, tracking_error, treynor, win_rate%]
+STAT_CAGR = 6
+STAT_DRAWDOWN = 7
+STAT_NET_PROFIT = 12
+STAT_SHARPE = 15
+STAT_WIN_RATE = 20
+
+
+def _get_stat(stats: list | None, index: int) -> float | None:
+    """Safely get a statistic from the array by index."""
+    if not stats or not isinstance(stats, list) or index >= len(stats):
+        return None
+    val = stats[index]
+    return float(val) if val is not None else None
+
+
 @tool
 async def read_optimization(
     optimization_id: str,
@@ -192,22 +211,28 @@ async def read_optimization(
         page_size: Results per page (default: 20, max: 50)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
+        # Note: QC API /optimizations/read only needs optimizationId, not projectId
         result = await qc_request(
             "/optimizations/read",
-            {"projectId": qc_project_id, "optimizationId": optimization_id},
+            {"optimizationId": optimization_id},
         )
 
         opt = result.get("optimization", {})
-        all_backtests = opt.get("backtests", [])
+
+        # QC API returns backtests as a dict keyed by backtest ID, not an array
+        backtests_data = opt.get("backtests", {})
+        if isinstance(backtests_data, dict):
+            # Convert dict of backtests to list
+            all_backtests = list(backtests_data.values()) if backtests_data else []
+        elif isinstance(backtests_data, list):
+            all_backtests = backtests_data
+        else:
+            all_backtests = []
 
         # Sort by target metric (Sharpe by default)
         sorted_bt = sorted(
             all_backtests,
-            key=lambda x: float(x.get("statistics", {}).get("Sharpe Ratio", 0) or 0),
+            key=lambda x: _get_stat(x.get("statistics"), STAT_SHARPE) or 0,
             reverse=True,
         )
 
@@ -220,28 +245,28 @@ async def read_optimization(
         # Format results
         results = []
         for i, bt in enumerate(page_results):
-            stats = bt.get("statistics", {})
+            stats = bt.get("statistics")  # Array of numbers by index
             params = bt.get("parameters", {})
             results.append({
                 "rank": start + i + 1,
                 "parameters": params,
-                "net_profit": stats.get("Net Profit"),
-                "cagr": stats.get("Compounding Annual Return"),
-                "sharpe_ratio": stats.get("Sharpe Ratio"),
-                "max_drawdown": stats.get("Drawdown"),
-                "win_rate": stats.get("Win Rate"),
+                "net_profit": _get_stat(stats, STAT_NET_PROFIT),
+                "cagr": _get_stat(stats, STAT_CAGR),
+                "sharpe_ratio": _get_stat(stats, STAT_SHARPE),
+                "max_drawdown": _get_stat(stats, STAT_DRAWDOWN),
+                "win_rate": _get_stat(stats, STAT_WIN_RATE),
             })
 
         # Best result
         best = None
         if sorted_bt:
             best_bt = sorted_bt[0]
-            best_stats = best_bt.get("statistics", {})
+            best_stats = best_bt.get("statistics")  # Array of numbers by index
             best = {
                 "parameters": best_bt.get("parameters", {}),
-                "net_profit": best_stats.get("Net Profit"),
-                "cagr": best_stats.get("Compounding Annual Return"),
-                "sharpe_ratio": best_stats.get("Sharpe Ratio"),
+                "net_profit": _get_stat(best_stats, STAT_NET_PROFIT),
+                "cagr": _get_stat(best_stats, STAT_CAGR),
+                "sharpe_ratio": _get_stat(best_stats, STAT_SHARPE),
             }
 
         return json.dumps({
