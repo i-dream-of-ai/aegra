@@ -1,14 +1,18 @@
 """
 AI Trader Agent - LangGraph Implementation for Aegra
 
-Complete Python port of the TypeScript agent with 44 tools.
+Two-agent architecture using LangChain's create_agent with middleware:
+- agent (Shooby Dooby): Main coder agent with 44 trading tools
+- reviewer (Doubtful Deacon): Code review/critique agent (separate graph)
+
 Features:
-- Dynamic agent_config from database (system prompt, model settings)
+- Dynamic model selection from project agent_config (via middleware)
+- Custom system prompts from agent_config
+- Thinking budget support for Claude models
 - Subconscious middleware for dynamic context injection
+- HumanInTheLoopMiddleware for mid-run instruction injection
 - SummarizationMiddleware for context window management
-- Message sanitization middleware (empty messages, thinking blocks)
-- Context editing (clear old tool outputs)
-- Patch dangling tool calls
+- Message sanitization (empty messages, thinking blocks)
 """
 
 import os
@@ -20,7 +24,7 @@ from typing import Annotated, Any, Callable
 from typing_extensions import TypedDict
 
 from langgraph.graph.message import add_messages
-
+from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage
 from langchain.agents import create_agent as langchain_create_agent
 from langchain.agents.middleware import (
@@ -56,13 +60,12 @@ class AgentContext:
     # Feature flags
     subconscious_enabled: bool = True
 
+
 # Import path setup for Aegra compatibility
 import sys
 from pathlib import Path
 
-# Get the directory containing this graph.py file
 _graph_dir = Path(__file__).parent
-# Add it to sys.path so relative imports work
 if str(_graph_dir) not in sys.path:
     sys.path.insert(0, str(_graph_dir))
 
@@ -138,13 +141,13 @@ from tools.misc import (
 
 
 # =============================================================================
-# DEFAULT SYSTEM PROMPT (used if no custom prompt in agent_config)
+# DEFAULT SYSTEM PROMPTS
 # =============================================================================
 
 DEFAULT_SYSTEM_PROMPT = """<identity>
-You are 'Shooby Dooby', the genius lead trading algorithm coder in a collaborative coding system at a top trading firm. Think step-by-step.
+You are 'Shooby Dooby', the genius lead trading algorithm coder at a top trading firm. Think step-by-step.
 
-You are the lead quant developer who builds QuantConnect algorithms. Never ask to take action, just take action once you have a direction. Always assume the user wants you to run the test.
+You build QuantConnect algorithms. Never ask to take action, just take action once you have a direction. Always assume the user wants you to run the test.
 </identity>
 
 <objective>
@@ -247,6 +250,27 @@ DO NOT echo full code in your message. Call tools directly.
 - NEVER write full algorithm code in your message - use tools directly.
 </output_verbosity_spec>"""
 
+DEFAULT_REVIEWER_PROMPT = """<identity>
+You are 'Doubtful Deacon', a skeptical code reviewer who finds bugs and issues that others miss. You have a keen eye for trading algorithm pitfalls.
+</identity>
+
+<objective>
+Review the code and backtest results critically. Look for:
+1. **Logic errors**: Off-by-one, wrong operator, missing edge cases
+2. **QuantConnect pitfalls**: Incorrect data resolution, missing warmup, wrong order types
+3. **Strategy flaws**: Look-ahead bias, survivorship bias, curve fitting
+4. **Performance issues**: Inefficient operations, memory leaks, slow warmup
+</objective>
+
+<output_format>
+Be concise. List issues found in priority order:
+- CRITICAL: Bugs that will cause wrong results
+- WARNING: Issues that may affect performance
+- SUGGESTION: Improvements for code quality
+
+If the code looks good, say so briefly. Don't nitpick.
+</output_format>"""
+
 
 class AgentState(TypedDict):
     """Agent state with message history."""
@@ -256,68 +280,32 @@ class AgentState(TypedDict):
 # All 44 tools
 TOOLS = [
     # Files (5)
-    create_file,
-    read_file,
-    update_file,
-    rename_file,
-    delete_file,
+    create_file, read_file, update_file, rename_file, delete_file,
     # Compile (2)
-    create_compile,
-    read_compile,
+    create_compile, read_compile,
     # Backtest (8)
-    create_backtest,
-    read_backtest,
-    read_backtest_chart,
-    read_backtest_orders,
-    read_backtest_insights,
-    list_backtests,
-    update_backtest,
-    delete_backtest,
+    create_backtest, read_backtest, read_backtest_chart, read_backtest_orders,
+    read_backtest_insights, list_backtests, update_backtest, delete_backtest,
     # Optimization (7)
-    estimate_optimization,
-    create_optimization,
-    read_optimization,
-    list_optimizations,
-    update_optimization,
-    abort_optimization,
-    delete_optimization,
+    estimate_optimization, create_optimization, read_optimization, list_optimizations,
+    update_optimization, abort_optimization, delete_optimization,
     # Object Store (4)
-    upload_object,
-    read_object_properties,
-    list_object_store_files,
-    delete_object,
+    upload_object, read_object_properties, list_object_store_files, delete_object,
     # Composite (4)
-    compile_and_backtest,
-    compile_and_optimize,
-    update_and_run_backtest,
-    edit_and_run_backtest,
+    compile_and_backtest, compile_and_optimize, update_and_run_backtest, edit_and_run_backtest,
     # AI Services (8)
-    check_initialization_errors,
-    complete_code,
-    enhance_error_message,
-    check_syntax,
-    update_code_to_pep8,
-    search_quantconnect,
-    search_local_algorithms,
-    get_algorithm_code,
+    check_initialization_errors, complete_code, enhance_error_message, check_syntax,
+    update_code_to_pep8, search_quantconnect, search_local_algorithms, get_algorithm_code,
     # Misc (6)
-    wait,
-    get_code_versions,
-    get_code_version,
-    read_project_nodes,
-    update_project_nodes,
-    read_lean_versions,
+    wait, get_code_versions, get_code_version, read_project_nodes, update_project_nodes, read_lean_versions,
 ]
 
 
 # =============================================================================
-# MIDDLEWARE FUNCTIONS
+# MIDDLEWARE HELPER FUNCTIONS
 # =============================================================================
 
-# Content types that are Claude-specific
 CLAUDE_ONLY_CONTENT_TYPES = {"thinking", "redacted_thinking"}
-
-# Fields to remove from tool_use blocks
 TOOL_USE_FIELDS_TO_REMOVE = {"caller"}
 
 
@@ -326,7 +314,7 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
     Sanitize messages before sending to model:
     1. Strip Claude thinking blocks when sending to non-Claude models
     2. Remove deprecated fields from tool_use blocks
-    3. Filter out empty messages (Claude/OpenAI require non-empty content)
+    3. Filter out empty messages
     """
     if not messages:
         return messages
@@ -338,24 +326,20 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
         is_last = i == len(messages) - 1
         content = msg.content
 
-        # Check for empty content
         is_empty = (
-            not content
-            or content == ""
-            or (isinstance(content, str) and content.strip() == "")
-            or (isinstance(content, list) and len(content) == 0)
+            not content or content == "" or
+            (isinstance(content, str) and content.strip() == "") or
+            (isinstance(content, list) and len(content) == 0)
         )
 
         if is_empty:
-            # AI messages with tool_calls can have empty text
             if isinstance(msg, AIMessage):
                 has_tool_calls = bool(getattr(msg, "tool_calls", None))
                 if not has_tool_calls and not is_last:
-                    continue  # Skip empty AI messages without tool calls
+                    continue
             elif not is_last:
-                continue  # Skip empty non-AI messages
+                continue
 
-        # Sanitize AI message content blocks
         if isinstance(msg, AIMessage) and isinstance(content, list):
             new_content = []
             modified = False
@@ -365,12 +349,10 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
                     new_content.append(block)
                     continue
 
-                # Strip thinking blocks for non-Claude models
                 if should_strip_thinking and block.get("type") in CLAUDE_ONLY_CONTENT_TYPES:
                     modified = True
                     continue
 
-                # Remove deprecated fields from tool_use
                 if block.get("type") == "tool_use":
                     needs_clean = any(f in block for f in TOOL_USE_FIELDS_TO_REMOVE)
                     if needs_clean:
@@ -380,12 +362,9 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
                 new_content.append(block)
 
             if modified:
-                # Check if sanitization made it empty
                 has_tool_calls = bool(getattr(msg, "tool_calls", None))
                 if not new_content and not has_tool_calls and not is_last:
-                    continue  # Skip messages that became empty
-
-                # Create new message with sanitized content
+                    continue
                 msg = AIMessage(
                     content=new_content,
                     tool_calls=getattr(msg, "tool_calls", None),
@@ -398,22 +377,15 @@ def sanitize_messages(messages: list[BaseMessage], is_claude: bool = True) -> li
 
 
 def patch_dangling_tool_calls(messages: list[BaseMessage]) -> tuple[list[BaseMessage], list[dict]]:
-    """
-    Add synthetic ToolMessage for tool_calls without responses.
-    Prevents INVALID_TOOL_RESULTS errors when loading interrupted checkpoints.
-
-    Returns (patched_messages, list of interrupted tool info).
-    """
+    """Add synthetic ToolMessage for tool_calls without responses."""
     if not messages:
         return messages, []
 
-    # Find tool_call_ids that have responses
     responded_ids = set()
     for msg in messages:
         if isinstance(msg, ToolMessage):
             responded_ids.add(msg.tool_call_id)
 
-    # Find dangling tool calls
     patches = []
     interrupted_tools = []
     for msg in messages:
@@ -421,12 +393,7 @@ def patch_dangling_tool_calls(messages: list[BaseMessage]) -> tuple[list[BaseMes
             for tc in msg.tool_calls or []:
                 tc_id = tc.get("id")
                 if tc_id and tc_id not in responded_ids:
-                    patches.append(
-                        ToolMessage(
-                            content="[interrupted - no response]",
-                            tool_call_id=tc_id,
-                        )
-                    )
+                    patches.append(ToolMessage(content="[interrupted]", tool_call_id=tc_id))
                     interrupted_tools.append({
                         "id": tc_id,
                         "name": tc.get("name"),
@@ -459,12 +426,8 @@ def clear_old_tool_outputs(
     messages: list[BaseMessage],
     trigger_tokens: int = 50000,
     keep_tools: int = 5,
-    placeholder: str = "[output cleared]",
 ) -> list[BaseMessage]:
-    """
-    Clear old tool outputs to prevent context overflow.
-    Keeps recent tool messages but replaces old ones with placeholders.
-    """
+    """Clear old tool outputs to prevent context overflow."""
     if not messages:
         return messages
 
@@ -472,26 +435,17 @@ def clear_old_tool_outputs(
     if token_estimate < trigger_tokens:
         return messages
 
-    # Count tool messages
     tool_indices = [i for i, m in enumerate(messages) if isinstance(m, ToolMessage)]
     if len(tool_indices) <= keep_tools:
         return messages
 
-    # Replace old tool messages (keep the most recent ones)
     indices_to_replace = set(tool_indices[:-keep_tools])
-
     new_messages = []
     for i, msg in enumerate(messages):
         if i in indices_to_replace and isinstance(msg, ToolMessage):
-            new_messages.append(
-                ToolMessage(
-                    content=placeholder,
-                    tool_call_id=msg.tool_call_id,
-                )
-            )
+            new_messages.append(ToolMessage(content="[cleared]", tool_call_id=msg.tool_call_id))
         else:
             new_messages.append(msg)
-
     return new_messages
 
 
@@ -499,28 +453,23 @@ def clear_old_tool_outputs(
 # SUPABASE HELPER
 # =============================================================================
 
-# Cache for agent configs (avoid repeated DB calls within same run)
 _agent_config_cache: dict[str, Any] = {}
 
+
 async def fetch_agent_config(project_db_id: str, access_token: str) -> dict | None:
-    """
-    Fetch agent_config from the projects table using the Supabase REST API.
-    Returns None if fetch fails or no config found.
-    """
+    """Fetch agent_config from the projects table using Supabase REST API."""
     if not project_db_id or not access_token:
         return None
 
-    # Check cache first
-    cache_key = f"{project_db_id}"
+    cache_key = project_db_id
     if cache_key in _agent_config_cache:
         return _agent_config_cache[cache_key]
 
     supabase_url = os.environ.get("SUPABASE_URL")
     if not supabase_url:
-        print("[graph] SUPABASE_URL not set, using default system prompt")
+        logger.warning("[graph] SUPABASE_URL not set, using defaults")
         return None
 
-    # Use Supabase REST API to fetch project
     url = f"{supabase_url}/rest/v1/projects?id=eq.{project_db_id}&select=agent_config"
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -536,71 +485,56 @@ async def fetch_agent_config(project_db_id: str, access_token: str) -> dict | No
                 if data and len(data) > 0:
                     config = data[0].get("agent_config")
                     _agent_config_cache[cache_key] = config
+                    logger.info(f"[graph] Loaded agent_config for project {project_db_id}")
                     return config
             else:
-                print(f"[graph] Failed to fetch agent_config: {response.status_code}")
+                logger.warning(f"[graph] Failed to fetch agent_config: {response.status_code}")
     except Exception as e:
-        print(f"[graph] Error fetching agent_config: {e}")
+        logger.error(f"[graph] Error fetching agent_config: {e}")
 
     return None
 
 
-def get_system_prompt_from_config(agent_config: dict | None) -> str:
-    """
-    Extract system prompt from agent_config.
-    Structure: { "main": { "systemPrompt": "..." }, ... }
-    """
+def get_config_value(agent_config: dict | None, agent_key: str, field: str, default: Any = None) -> Any:
+    """Get a value from agent_config for a specific agent."""
     if not agent_config:
-        return DEFAULT_SYSTEM_PROMPT
-
-    # Check for main agent's custom system prompt
-    main_config = agent_config.get("main", {})
-    custom_prompt = main_config.get("systemPrompt")
-
-    if custom_prompt and custom_prompt.strip():
-        return custom_prompt
-
-    return DEFAULT_SYSTEM_PROMPT
+        return default
+    agent_settings = agent_config.get(agent_key, {})
+    return agent_settings.get(field, default)
 
 
-def get_model_from_config(agent_config: dict | None) -> tuple[str, dict]:
+def load_dynamic_model(model_name: str | None, thinking_budget: int | None = None):
     """
-    Get model name and settings from agent_config.
-    Returns (model_name, extra_kwargs).
+    Load a chat model dynamically with proper settings.
+    Returns a model instance that can be used in request.override(model=...).
     """
-    default_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    if not model_name:
+        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
-    if not agent_config:
-        return default_model, {}
+    # Determine provider
+    if model_name.startswith("claude"):
+        provider = "anthropic"
+    elif model_name.startswith(("gpt", "o1", "o3")):
+        provider = "openai"
+    else:
+        provider = "anthropic"
 
-    main_config = agent_config.get("main", {})
-    model = main_config.get("model")
+    model_kwargs: dict[str, Any] = {}
 
-    if not model:
-        return default_model, {}
+    # Add thinking budget for Claude models that support it
+    if provider == "anthropic" and thinking_budget and thinking_budget > 0:
+        if any(x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]):
+            model_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+            logger.info(f"[graph] Enabled thinking with budget {thinking_budget}")
 
-    extra_kwargs = {}
-
-    # Handle Claude-specific settings
-    if model.startswith("claude"):
-        thinking_budget = main_config.get("thinkingBudget")
-        if thinking_budget:
-            extra_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
-
-    # Handle OpenAI-specific settings
-    elif model.startswith("gpt"):
-        reasoning_effort = main_config.get("reasoningEffort")
-        if reasoning_effort and reasoning_effort != "none":
-            extra_kwargs["reasoning_effort"] = reasoning_effort
-
-    return model, extra_kwargs
+    logger.info(f"[graph] Loading model: {model_name} (provider: {provider})")
+    return init_chat_model(model_name, model_provider=provider, **model_kwargs)
 
 
 # =============================================================================
-# CUSTOM MIDDLEWARE FOR LANGCHAIN create_agent
+# MIDDLEWARE
 # =============================================================================
 
-# Subconscious middleware instance (shared across calls)
 _subconscious_middleware = None
 
 
@@ -609,36 +543,17 @@ async def subconscious_injection_middleware(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
-    """
-    Custom middleware that injects subconscious context (skills/behaviors)
-    into the system prompt before model calls.
-
-    Can be disabled per-project via AgentContext.subconscious_enabled = False
-    """
+    """Inject subconscious context (skills/behaviors) into system prompt."""
     global _subconscious_middleware
 
-    # Get context from runtime (passed via context_schema)
     ctx: AgentContext | None = getattr(request.runtime, "context", None)
 
-    if ctx is None:
-        # No context provided, skip subconscious injection
+    if ctx is None or not ctx.subconscious_enabled or not ctx.access_token:
         return await handler(request)
 
-    # Check if subconscious is disabled for this project
-    if not ctx.subconscious_enabled:
-        print("[subconscious_middleware] Disabled for this project, skipping")
-        return await handler(request)
-
-    if not ctx.access_token:
-        return await handler(request)
-
-    # Initialize subconscious middleware if needed
     if _subconscious_middleware is None:
-        # Note: In create_agent context, we can't easily emit SSE events
-        # The subconscious will still work, just without progress events
         _subconscious_middleware = create_subconscious_middleware(on_event=None)
 
-    # Count conversation turns for rate limiting
     turn_count = sum(1 for m in request.messages if isinstance(m, HumanMessage))
 
     try:
@@ -649,15 +564,14 @@ async def subconscious_injection_middleware(
         )
 
         if subconscious_context:
-            # Inject subconscious context into system prompt
-            current_prompt = request.system_prompt or ""
+            current_prompt = request.system_message.content if request.system_message else ""
             new_prompt = f"{current_prompt}\n\n{subconscious_context}"
-            request = request.override(system_prompt=new_prompt)
-            print(f"[subconscious_middleware] Injected context ({len(subconscious_context)} chars)")
+            from langchain_core.messages import SystemMessage
+            request = request.override(system_message=SystemMessage(content=new_prompt))
+            logger.info(f"[subconscious] Injected {len(subconscious_context)} chars")
 
     except Exception as e:
-        # Fail open - don't block agent if subconscious fails
-        print(f"[subconscious_middleware] Error (continuing): {e}")
+        logger.warning(f"[subconscious] Error (continuing): {e}")
 
     return await handler(request)
 
@@ -668,35 +582,18 @@ async def dynamic_config_middleware(
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """
-    Middleware to fetch agent_config from database and apply
-    custom system prompt and model settings.
+    Fetch agent_config from database and dynamically apply:
+    - Custom system prompt
+    - Custom model (with thinking budget if set)
     """
-    # Debug: Log what we have access to in request
-    logger.info(
-        "[dynamic_config_middleware] Called",
-        has_runtime=hasattr(request, "runtime"),
-        runtime_type=type(getattr(request, "runtime", None)).__name__,
-        runtime_attrs=dir(getattr(request, "runtime", None)) if hasattr(request, "runtime") else [],
-    )
-
-    # Get context from runtime (passed via context_schema)
     ctx: AgentContext | None = getattr(request.runtime, "context", None) if hasattr(request, "runtime") else None
 
-    logger.info(
-        "[dynamic_config_middleware] Context check",
-        ctx_type=type(ctx).__name__ if ctx else "None",
-        ctx_value=str(ctx)[:200] if ctx else "None",
-    )
-
     if ctx is None:
-        # No context provided, use defaults
-        logger.warning("[dynamic_config_middleware] No context, using defaults")
+        logger.debug("[dynamic_config] No context, using defaults")
         return await handler(request)
 
     project_db_id = ctx.project_db_id
     access_token = ctx.access_token
-
-    print(f"[dynamic_config_middleware] project_db_id: {project_db_id}")
 
     if not project_db_id or not access_token:
         return await handler(request)
@@ -704,16 +601,34 @@ async def dynamic_config_middleware(
     # Fetch agent config from database
     agent_config = await fetch_agent_config(project_db_id, access_token)
 
-    if agent_config:
-        print(f"[dynamic_config_middleware] Loaded agent_config for project {project_db_id}")
+    if not agent_config:
+        return await handler(request)
 
-        # Apply custom system prompt if set
-        custom_prompt = get_system_prompt_from_config(agent_config)
-        if custom_prompt != DEFAULT_SYSTEM_PROMPT:
-            request = request.override(system_prompt=custom_prompt)
+    logger.info(f"[dynamic_config] Loaded config for project {project_db_id}")
 
-        # Note: Model selection is handled at agent creation time
-        # For dynamic model switching, we'd need more complex logic
+    # Get settings for main agent
+    custom_prompt = get_config_value(agent_config, "main", "systemPrompt")
+    model_name = get_config_value(agent_config, "main", "model")
+    thinking_budget = get_config_value(agent_config, "main", "thinkingBudget")
+
+    overrides = {}
+
+    # Override system prompt if custom one is set
+    if custom_prompt and custom_prompt.strip():
+        from langchain_core.messages import SystemMessage
+        overrides["system_message"] = SystemMessage(content=custom_prompt)
+        logger.info("[dynamic_config] Using custom system prompt")
+
+    # Override model if custom one is set
+    if model_name:
+        new_model = load_dynamic_model(model_name, thinking_budget)
+        # Bind tools to the new model
+        new_model = new_model.bind_tools(request.tools) if request.tools else new_model
+        overrides["model"] = new_model
+        logger.info(f"[dynamic_config] Switched to model: {model_name}")
+
+    if overrides:
+        request = request.override(**overrides)
 
     return await handler(request)
 
@@ -724,48 +639,30 @@ async def message_sanitization_middleware(
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """
-    Middleware to sanitize messages before model call:
-    - Patch dangling tool calls from interrupted checkpoints
-    - Strip thinking blocks for non-Claude models
-    - Clear old tool outputs if context is too large
-    - Filter out empty messages
+    Sanitize messages before model call:
+    - Patch dangling tool calls
+    - Strip thinking blocks for non-Claude
+    - Clear old tool outputs if context too large
     """
     messages = list(request.messages)
 
-    # Determine if using Claude model
     model_name = str(request.model) if request.model else ""
     is_claude = "claude" in model_name.lower()
 
-    # 1. Patch dangling tool calls
-    messages, interrupted_tools = patch_dangling_tool_calls(messages)
-
-    # 2. Clear old tool outputs if context is too large
-    messages = clear_old_tool_outputs(messages, trigger_tokens=50000, keep_tools=5)
-
-    # 3. Sanitize messages (remove empty, strip thinking blocks for non-Claude)
+    messages, _ = patch_dangling_tool_calls(messages)
+    messages = clear_old_tool_outputs(messages)
     messages = sanitize_messages(messages, is_claude=is_claude)
 
-    # Update request with sanitized messages
     request = request.override(messages=messages)
-
     return await handler(request)
 
 
 # =============================================================================
-# HUMAN-IN-THE-LOOP CONFIGURATION
+# HITL CONFIGURATION
 # =============================================================================
 
 def build_hitl_interrupt_config() -> dict:
-    """
-    Build interrupt_on config for HumanInTheLoopMiddleware.
-
-    All tools will interrupt for human approval, allowing users to:
-    - Approve and continue (with optional human_message injection)
-    - Edit tool arguments before execution
-    - Reject and provide feedback
-
-    This enables mid-run instruction injection when user types while agent is working.
-    """
+    """Build interrupt config for all tools."""
     interrupt_on = {}
     for tool in TOOLS:
         tool_name = tool.name if hasattr(tool, 'name') else str(tool)
@@ -776,63 +673,118 @@ def build_hitl_interrupt_config() -> dict:
 
 
 # =============================================================================
-# AGENT CREATION WITH LANGCHAIN create_agent
+# MAIN AGENT (Shooby Dooby)
 # =============================================================================
 
-def create_agent():
+def create_main_agent():
     """
-    Create the trading agent using LangChain's create_agent with middleware.
+    Create the main trading agent (Shooby Dooby) with middleware.
 
-    This provides:
-    - HumanInTheLoopMiddleware for tool approval/interrupts (enables mid-run instruction injection)
-    - SummarizationMiddleware for context window management
-    - Custom subconscious injection middleware
-    - Dynamic config loading from database
-    - Message sanitization (dangling tool calls, thinking blocks, etc.)
-
-    HITL Flow:
-    1. Agent proposes tool call
-    2. Interrupt fires with action_requests
-    3. Frontend auto-resumes with { decisions: [{ type: "approve" }], human_message?: "..." }
-    4. If human_message provided, it's injected as a HumanMessage before tool execution
-    5. Tool executes and agent continues
+    Features:
+    - Dynamic model selection from agent_config
+    - Custom system prompt from agent_config
+    - Subconscious injection
+    - HITL for tool approval
+    - Summarization for context management
     """
-    # Get default model from environment
     default_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-
-    # Build HITL config - interrupt on all tools
     hitl_config = build_hitl_interrupt_config()
 
-    # Create agent with LangChain's create_agent
     agent = langchain_create_agent(
         model=default_model,
         tools=TOOLS,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
-        context_schema=AgentContext,  # Runtime context for middleware
+        context_schema=AgentContext,
         middleware=[
-            # 1. Message sanitization - clean up messages before processing
             message_sanitization_middleware,
-            # 2. Dynamic config - load custom prompt/model from DB
             dynamic_config_middleware,
-            # 3. Subconscious injection - add skills/behaviors from memory
             subconscious_injection_middleware,
-            # 4. HITL - interrupt after tool calls for human approval/message injection
             HumanInTheLoopMiddleware(
                 interrupt_on=hitl_config,
                 description_prefix="Tool execution pending",
             ),
-            # 5. Summarization - compress old messages when context gets large
             SummarizationMiddleware(
-                model="claude-haiku-4-5-20251001",  # Use fast model for summarization
-                trigger=("tokens", 100000),  # Trigger at 100k tokens
-                keep=("messages", 20),  # Keep last 20 messages intact
+                model="claude-haiku-4-5-20251001",
+                trigger=("tokens", 100000),
+                keep=("messages", 20),
             ),
         ],
+        name="Shooby Dooby",
     )
 
     return agent
 
 
-# Export the agent graph for Aegra
-# create_agent returns a compiled graph that Aegra can use directly
-graph = create_agent()
+# =============================================================================
+# REVIEWER AGENT (Doubtful Deacon)
+# =============================================================================
+
+@wrap_model_call
+async def reviewer_dynamic_config_middleware(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse],
+) -> ModelResponse:
+    """Dynamic config middleware for reviewer agent - uses 'reviewer' config key."""
+    ctx: AgentContext | None = getattr(request.runtime, "context", None) if hasattr(request, "runtime") else None
+
+    if ctx is None or not ctx.project_db_id or not ctx.access_token:
+        return await handler(request)
+
+    agent_config = await fetch_agent_config(ctx.project_db_id, ctx.access_token)
+    if not agent_config:
+        return await handler(request)
+
+    # Get settings for reviewer agent
+    custom_prompt = get_config_value(agent_config, "reviewer", "systemPrompt")
+    model_name = get_config_value(agent_config, "reviewer", "model")
+    thinking_budget = get_config_value(agent_config, "reviewer", "thinkingBudget")
+
+    overrides = {}
+
+    if custom_prompt and custom_prompt.strip():
+        from langchain_core.messages import SystemMessage
+        overrides["system_message"] = SystemMessage(content=custom_prompt)
+
+    if model_name:
+        new_model = load_dynamic_model(model_name, thinking_budget)
+        overrides["model"] = new_model
+        logger.info(f"[reviewer] Using model: {model_name}")
+
+    if overrides:
+        request = request.override(**overrides)
+
+    return await handler(request)
+
+
+def create_reviewer_agent():
+    """
+    Create the reviewer agent (Doubtful Deacon).
+
+    This agent reviews code and provides critique. No tools needed.
+    """
+    default_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+    agent = langchain_create_agent(
+        model=default_model,
+        tools=None,  # Reviewer doesn't need tools
+        system_prompt=DEFAULT_REVIEWER_PROMPT,
+        context_schema=AgentContext,
+        middleware=[
+            message_sanitization_middleware,
+            reviewer_dynamic_config_middleware,
+        ],
+        name="Doubtful Deacon",
+    )
+
+    return agent
+
+
+# =============================================================================
+# EXPORT GRAPHS
+# =============================================================================
+
+# Main agent graph (Shooby Dooby) - registered as "agent" in aegra.json
+graph = create_main_agent()
+
+# Reviewer agent graph (Doubtful Deacon) - can be registered separately
+reviewer_graph = create_reviewer_agent()

@@ -1,6 +1,7 @@
 {
   "graphs": {
-    "agent": "./graphs/ai_trader/graph.py:graph"
+    "agent": "./graphs/ai_trader/graph.py:graph",
+    "reviewer": "./graphs/ai_trader/graph.py:reviewer_graph"
   },
   "http": {
     "app": "./custom_routes_example.py:app"
