@@ -47,7 +47,14 @@ DEFAULT_STREAM_MODES = ["values"]
 
 
 def map_command_to_langgraph(cmd: dict[str, Any]) -> Command:
-    """Convert API command to LangGraph Command"""
+    """Convert API command to LangGraph Command.
+
+    Handles human_message injection for HITL workflows:
+    - If resume contains human_message, extract it and inject as HumanMessage
+    - The message is added to state via the update field
+    """
+    from langchain_core.messages import HumanMessage
+
     goto = cmd.get("goto")
     if goto is not None and not isinstance(goto, list):
         goto = [goto]
@@ -59,6 +66,24 @@ def map_command_to_langgraph(cmd: dict[str, Any]) -> Command:
     ):
         update = [tuple(t) for t in update]
 
+    # Handle human_message injection from resume payload
+    # Frontend sends: { resume: { decisions: [...], human_message: "..." } }
+    resume = cmd.get("resume")
+    if isinstance(resume, dict) and "human_message" in resume:
+        human_message_content = resume.pop("human_message")  # Remove from resume
+        if human_message_content:
+            # Create HumanMessage and add to state update
+            human_msg = HumanMessage(content=human_message_content)
+            if update is None:
+                update = {"messages": [human_msg]}
+            elif isinstance(update, dict):
+                existing_messages = update.get("messages", [])
+                update["messages"] = existing_messages + [human_msg]
+            else:
+                # update is a list of tuples - append message update
+                update = list(update) + [("messages", [human_msg])]
+            logger.info(f"[map_command] Injecting human_message: {human_message_content[:50]}...")
+
     return Command(
         update=update,
         goto=(
@@ -69,7 +94,7 @@ def map_command_to_langgraph(cmd: dict[str, Any]) -> Command:
             if goto
             else None
         ),
-        resume=cmd.get("resume"),
+        resume=resume,
     )
 
 
