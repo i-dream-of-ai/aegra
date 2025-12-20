@@ -22,10 +22,12 @@ async def wait(reason: str) -> str:
     """
     # Interrupt the graph execution - Aegra/LangGraph will handle this
     # by checking for new messages and resuming with results
-    result = interrupt({
-        "type": "check_inbox",
-        "reason": reason,
-    })
+    result = interrupt(
+        {
+            "type": "check_inbox",
+            "reason": reason,
+        }
+    )
 
     # When resumed, result will be the item found in inbox (or "no_update")
     return result if result else json.dumps({"status": "no_update"})
@@ -52,10 +54,12 @@ async def get_code_versions(
     try:
         project_db_id = get_project_db_id(config)
         if not project_db_id:
-            return json.dumps({
-                "error": True,
-                "message": "Project database ID not found.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "Project database ID not found.",
+                }
+            )
 
         # Use user's token for RLS (code_versions is project-scoped)
         client = SupabaseClient(config)
@@ -83,50 +87,57 @@ async def get_code_versions(
 
         versions = []
         for i, v in enumerate(page_versions):
-            versions.append({
-                "rank": start + i + 1,
-                "id": v.get("id"),
-                "backtest_name": v.get("backtest_name") or v.get("name"),
-                "backtest_id": v.get("backtest_id"),
-                "compile_id": v.get("compile_id"),
-                "symbols": v.get("symbols"),
-                "strategy_type": v.get("strategy_type"),
-                "metrics": {
-                    "total_return": format_percent(v.get("total_return")),
-                    "sharpe_ratio": format_decimal(v.get("sharpe_ratio")),
-                    "max_drawdown": format_percent(v.get("max_drawdown")),
-                    "win_rate": format_percent(v.get("win_rate")),
-                    "total_trades": v.get("total_trades"),
-                },
-                "backtest_period": (
-                    f"{v.get('backtest_start')} to {v.get('backtest_end')}"
-                    if v.get("backtest_start") and v.get("backtest_end")
-                    else None
-                ),
-                "status": v.get("backtest_status"),
-                "error": v.get("error_message"),
-                "created_at": v.get("created_at"),
-                "notes": v.get("notes"),
-            })
+            versions.append(
+                {
+                    "rank": start + i + 1,
+                    "id": v.get("id"),
+                    "backtest_name": v.get("backtest_name") or v.get("name"),
+                    "backtest_id": v.get("backtest_id"),
+                    "compile_id": v.get("compile_id"),
+                    "symbols": v.get("symbols"),
+                    "strategy_type": v.get("strategy_type"),
+                    "metrics": {
+                        "total_return": format_percent(v.get("total_return")),
+                        "sharpe_ratio": format_decimal(v.get("sharpe_ratio")),
+                        "max_drawdown": format_percent(v.get("max_drawdown")),
+                        "win_rate": format_percent(v.get("win_rate")),
+                        "total_trades": v.get("total_trades"),
+                    },
+                    "backtest_period": (
+                        f"{v.get('backtest_start')} to {v.get('backtest_end')}"
+                        if v.get("backtest_start") and v.get("backtest_end")
+                        else None
+                    ),
+                    "status": v.get("backtest_status"),
+                    "error": v.get("error_message"),
+                    "created_at": v.get("created_at"),
+                    "notes": v.get("notes"),
+                }
+            )
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "hint": (
+                    "No code versions found. Run a backtest to create a snapshot."
+                    if total == 0
+                    else "Use get_code_version with an ID to retrieve the full code."
+                ),
+                "versions": versions,
             },
-            "hint": (
-                "No code versions found. Run a backtest to create a snapshot."
-                if total == 0
-                else "Use get_code_version with an ID to retrieve the full code."
-            ),
-            "versions": versions,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code versions: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to get code versions: {str(e)}"}
+        )
 
 
 @tool
@@ -145,10 +156,12 @@ async def get_code_version(
     """
     try:
         if not version_id:
-            return json.dumps({
-                "error": True,
-                "message": "version_id is required. Use get_code_versions first.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "version_id is required. Use get_code_versions first.",
+                }
+            )
 
         # Use user's token for RLS (code_versions is project-scoped)
         client = SupabaseClient(config)
@@ -162,16 +175,20 @@ async def get_code_version(
         )
 
         if not data:
-            return json.dumps({
-                "error": True,
-                "message": f"Code version {version_id} not found.",
-                "hint": "Use get_code_versions to see available version IDs.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"Code version {version_id} not found.",
+                    "hint": "Use get_code_versions to see available version IDs.",
+                }
+            )
 
         return json.dumps(data[0], indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code version: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to get code version: {str(e)}"}
+        )
 
 
 @tool
@@ -194,7 +211,9 @@ async def read_project_nodes(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read project nodes: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read project nodes: {str(e)}"}
+        )
 
 
 @tool
@@ -221,14 +240,18 @@ async def update_project_nodes(
             {"projectId": qc_project_id, "nodes": nodes},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Updated project nodes: {nodes}",
-            "nodes": nodes,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Updated project nodes: {nodes}",
+                "nodes": nodes,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update project nodes: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update project nodes: {str(e)}"}
+        )
 
 
 @tool
@@ -251,4 +274,6 @@ async def read_lean_versions(
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read LEAN versions: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read LEAN versions: {str(e)}"}
+        )

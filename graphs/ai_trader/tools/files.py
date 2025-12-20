@@ -46,14 +46,18 @@ async def create_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' created successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' created successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create file: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to create file: {str(e)}"}
+        )
 
 
 @tool
@@ -80,34 +84,44 @@ async def read_file(
 
         files = result.get("files", [])
         if not files:
-            return json.dumps({
-                "error": True,
-                "message": f"File '{file_name}' not found.",
-                "hint": 'Use read_file with "*" to list all files.',
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"File '{file_name}' not found.",
+                    "hint": 'Use read_file with "*" to list all files.',
+                }
+            )
 
         # Handle multiple files (when file_name is "*")
         if file_name == "*" and isinstance(files, list):
             file_list = []
             for f in files:
-                file_list.append({
-                    "name": f.get("name"),
-                    "content": f.get("content"),
-                })
-            return json.dumps({
-                "success": True,
-                "files": file_list,
-            }, indent=2)
+                file_list.append(
+                    {
+                        "name": f.get("name"),
+                        "content": f.get("content"),
+                    }
+                )
+            return json.dumps(
+                {
+                    "success": True,
+                    "files": file_list,
+                },
+                indent=2,
+            )
 
         # Single file
         file_data = files[0] if isinstance(files, list) else files
         content = file_data.get("content", "")
 
-        return json.dumps({
-            "success": True,
-            "file_name": file_name,
-            "content": content,
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "file_name": file_name,
+                "content": content,
+            },
+            indent=2,
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to read file: {str(e)}"})
@@ -140,14 +154,18 @@ async def update_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' updated successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' updated successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update file: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update file: {str(e)}"}
+        )
 
 
 @tool
@@ -169,7 +187,9 @@ async def rename_file(
             return json.dumps({"error": True, "message": "No project context."})
 
         if not old_file_name or not new_file_name:
-            return json.dumps({"error": True, "message": "Both old and new file names are required."})
+            return json.dumps(
+                {"error": True, "message": "Both old and new file names are required."}
+            )
 
         await qc_request(
             "/files/update",
@@ -180,19 +200,23 @@ async def rename_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Renamed '{old_file_name}' to '{new_file_name}'.",
-            "old_name": old_file_name,
-            "new_name": new_file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Renamed '{old_file_name}' to '{new_file_name}'.",
+                "old_name": old_file_name,
+                "new_name": new_file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to rename file: {str(e)}",
-            "hint": 'Use read_file with "*" to list all files.',
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to rename file: {str(e)}",
+                "hint": 'Use read_file with "*" to list all files.',
+            }
+        )
 
 
 @tool
@@ -216,11 +240,15 @@ async def delete_file(
             {"projectId": qc_project_id, "name": file_name},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' deleted successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' deleted successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete file: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to delete file: {str(e)}"}
+        )

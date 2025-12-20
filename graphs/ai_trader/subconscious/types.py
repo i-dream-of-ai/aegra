@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional, Literal
 @dataclass
 class RetrievedSkill:
     """A skill retrieved from the database."""
+
     id: str
     name: str
     content: str
@@ -20,6 +21,7 @@ class RetrievedSkill:
 @dataclass
 class InjectionResult:
     """Result of context injection."""
+
     content: str
     skill_ids: List[str]
     token_count: int
@@ -30,6 +32,7 @@ class InjectionResult:
 @dataclass
 class SubconsciousState:
     """State tracked across turns for drift detection."""
+
     injected_topics: List[str] = field(default_factory=list)
     last_injection_turn: int = 0
     injection_count: int = 0
@@ -38,6 +41,7 @@ class SubconsciousState:
 @dataclass
 class SubconsciousEvent:
     """Event emitted for UI progress indicator."""
+
     type: Literal["subconscious_thinking", "instinct_injection"]
     stage: Optional[Literal["planning", "retrieving", "synthesizing", "done"]] = None
     data: Optional[Dict[str, Any]] = None
@@ -45,12 +49,44 @@ class SubconsciousEvent:
 
 # Confirmation patterns - short messages that mean "yes, proceed"
 CONFIRMATION_PATTERNS = {
-    "ok", "okay", "yes", "do it", "go", "go ahead", "proceed", "continue",
-    "sure", "yep", "yeah", "yea", "yup", "sounds good", "let's do it",
-    "lets do it", "let's go", "lets go", "perfect", "great", "good",
-    "nice", "cool", "alright", "right", "fine", "that works", "looks good",
-    "looks great", "do that", "make it so", "approved", "confirmed",
-    "affirmative", "agreed", "deal", "k", "kk"
+    "ok",
+    "okay",
+    "yes",
+    "do it",
+    "go",
+    "go ahead",
+    "proceed",
+    "continue",
+    "sure",
+    "yep",
+    "yeah",
+    "yea",
+    "yup",
+    "sounds good",
+    "let's do it",
+    "lets do it",
+    "let's go",
+    "lets go",
+    "perfect",
+    "great",
+    "good",
+    "nice",
+    "cool",
+    "alright",
+    "right",
+    "fine",
+    "that works",
+    "looks good",
+    "looks great",
+    "do that",
+    "make it so",
+    "approved",
+    "confirmed",
+    "affirmative",
+    "agreed",
+    "deal",
+    "k",
+    "kk",
 }
 
 

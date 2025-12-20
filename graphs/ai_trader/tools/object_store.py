@@ -29,10 +29,12 @@ async def upload_object(key: str, content: str) -> str:
         api_token = os.environ.get("QUANTCONNECT_TOKEN")
 
         if not all([org_id, user_id, api_token]):
-            return json.dumps({
-                "error": True,
-                "message": "Missing QC credentials (QUANTCONNECT_ORGANIZATION_ID, QUANTCONNECT_USER_ID, QUANTCONNECT_TOKEN).",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "Missing QC credentials (QUANTCONNECT_ORGANIZATION_ID, QUANTCONNECT_USER_ID, QUANTCONNECT_TOKEN).",
+                }
+            )
 
         if not key:
             return json.dumps({"error": True, "message": "key is required."})
@@ -63,28 +65,42 @@ async def upload_object(key: str, content: str) -> str:
                 timeout=60.0,
             )
 
-            result = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"raw": response.text}
+            result = (
+                response.json()
+                if response.headers.get("content-type", "").startswith(
+                    "application/json"
+                )
+                else {"raw": response.text}
+            )
 
             if not response.is_success or result.get("success") is False:
-                error_msg = result.get("errors", []) or result.get("error") or response.text
-                return json.dumps({
-                    "error": True,
-                    "message": f"Upload failed: {error_msg}",
-                    "key": key,
-                })
+                error_msg = (
+                    result.get("errors", []) or result.get("error") or response.text
+                )
+                return json.dumps(
+                    {
+                        "error": True,
+                        "message": f"Upload failed: {error_msg}",
+                        "key": key,
+                    }
+                )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Successfully uploaded object: {key}",
-            "key": key,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Successfully uploaded object: {key}",
+                "key": key,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to upload object: {str(e)}",
-            "key": key,
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to upload object: {str(e)}",
+                "key": key,
+            }
+        )
 
 
 @tool
@@ -101,7 +117,9 @@ async def read_object_properties(key: str) -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
         if not key:
             return json.dumps({"error": True, "message": "key is required."})
@@ -114,12 +132,14 @@ async def read_object_properties(key: str) -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to read object properties: {str(e)}",
-            "key": key,
-            "hint": "Use list_object_store_files to see available objects.",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to read object properties: {str(e)}",
+                "key": key,
+                "hint": "Use list_object_store_files to see available objects.",
+            }
+        )
 
 
 @tool
@@ -133,7 +153,9 @@ async def list_object_store_files(path: str = "") -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
         data = await qc_request(
             "/object/list",
@@ -143,10 +165,12 @@ async def list_object_store_files(path: str = "") -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to list object store files: {str(e)}",
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to list object store files: {str(e)}",
+            }
+        )
 
 
 @tool
@@ -160,7 +184,9 @@ async def delete_object(key: str) -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
         if not key:
             return json.dumps({"error": True, "message": "key is required."})
@@ -170,15 +196,19 @@ async def delete_object(key: str) -> str:
             {"organizationId": org_id, "key": key},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Successfully deleted object: {key}",
-            "key": key,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Successfully deleted object: {key}",
+                "key": key,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to delete object: {str(e)}",
-            "key": key,
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to delete object: {str(e)}",
+                "key": key,
+            }
+        )

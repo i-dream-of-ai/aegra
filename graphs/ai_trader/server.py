@@ -1,4 +1,5 @@
 """FastAPI server for the AI Trading Agent - No license required."""
+
 import os
 import json
 import asyncio
@@ -168,4 +169,5 @@ async def run(thread_id: str, request: RunRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

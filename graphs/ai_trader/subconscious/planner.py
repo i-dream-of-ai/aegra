@@ -16,6 +16,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 @dataclass
 class RetrievalPlan:
     """Output from the planner agent."""
+
     user_intent: str
     keyword_queries: List[str]
     semantic_queries: List[str]
@@ -74,7 +75,8 @@ async def generate_retrieval_plan(
         content = msg.get("content", "")
         if isinstance(content, list):
             content = " ".join(
-                block.get("text", "") for block in content
+                block.get("text", "")
+                for block in content
                 if isinstance(block, dict) and block.get("type") == "text"
             )
         if content:
@@ -83,9 +85,11 @@ async def generate_retrieval_plan(
     conversation_text = "\n".join(conv_summary)
 
     try:
-        response = await model.ainvoke([
-            SystemMessage(content=PLANNER_PROMPT),
-            HumanMessage(content=f"""Analyze this conversation and generate retrieval queries:
+        response = await model.ainvoke(
+            [
+                SystemMessage(content=PLANNER_PROMPT),
+                HumanMessage(
+                    content=f"""Analyze this conversation and generate retrieval queries:
 
 CONVERSATION:
 {conversation_text}
@@ -93,8 +97,10 @@ CONVERSATION:
 RECENT CONTEXT:
 {recent_context}
 
-Output JSON with user_intent, keyword_queries, and semantic_queries."""),
-        ])
+Output JSON with user_intent, keyword_queries, and semantic_queries."""
+                ),
+            ]
+        )
 
         # Parse JSON response
         content = response.content
@@ -129,11 +135,33 @@ def extract_simple_keywords(text: str) -> List[str]:
     """Extract simple keywords from text as fallback."""
     # Common trading/QC keywords to look for
     trading_keywords = {
-        "momentum", "mean reversion", "breakout", "trend", "rsi", "macd",
-        "bollinger", "moving average", "sma", "ema", "backtest", "optimize",
-        "risk", "drawdown", "sharpe", "position sizing", "stop loss",
-        "take profit", "leverage", "portfolio", "rebalance", "universe",
-        "selection", "alpha", "beta", "volatility", "correlation",
+        "momentum",
+        "mean reversion",
+        "breakout",
+        "trend",
+        "rsi",
+        "macd",
+        "bollinger",
+        "moving average",
+        "sma",
+        "ema",
+        "backtest",
+        "optimize",
+        "risk",
+        "drawdown",
+        "sharpe",
+        "position sizing",
+        "stop loss",
+        "take profit",
+        "leverage",
+        "portfolio",
+        "rebalance",
+        "universe",
+        "selection",
+        "alpha",
+        "beta",
+        "volatility",
+        "correlation",
     }
 
     text_lower = text.lower()

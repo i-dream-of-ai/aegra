@@ -82,7 +82,9 @@ def map_command_to_langgraph(cmd: dict[str, Any]) -> Command:
             else:
                 # update is a list of tuples - append message update
                 update = list(update) + [("messages", [human_msg])]
-            logger.info(f"[map_command] Injecting human_message: {human_message_content[:50]}...")
+            logger.info(
+                f"[map_command] Injecting human_message: {human_message_content[:50]}..."
+            )
 
     return Command(
         update=update,

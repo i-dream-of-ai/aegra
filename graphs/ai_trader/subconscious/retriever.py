@@ -206,7 +206,9 @@ async def retrieve_always_skills(
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, headers=headers, timeout=10.0)
+            response = await client.get(
+                url, params=params, headers=headers, timeout=10.0
+            )
 
             if response.status_code == 200:
                 data = response.json()
