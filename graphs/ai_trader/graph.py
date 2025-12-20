@@ -543,12 +543,23 @@ async def subconscious_injection_middleware(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
-    """Inject subconscious context (skills/behaviors) into system prompt."""
+    """
+    Inject subconscious context (skills/behaviors) into system prompt.
+
+    ONLY runs at the beginning of a run (first model call), not between tool steps.
+    We detect this by checking if there are any AIMessages in the history.
+    """
     global _subconscious_middleware
 
     ctx: AgentContext | None = getattr(request.runtime, "context", None)
 
     if ctx is None or not ctx.subconscious_enabled or not ctx.access_token:
+        return await handler(request)
+
+    # Only run subconscious at the START of a run, not between tool steps
+    # If there are AI messages, we're mid-run (tool loop) - skip subconscious
+    has_ai_messages = any(isinstance(m, AIMessage) for m in request.messages)
+    if has_ai_messages:
         return await handler(request)
 
     if _subconscious_middleware is None:
