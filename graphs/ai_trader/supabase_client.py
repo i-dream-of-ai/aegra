@@ -7,17 +7,14 @@ Provides authenticated access to Supabase using either:
 """
 
 import os
-from typing import Any
-
 import httpx
+from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 
 def get_supabase_config() -> tuple[str, str]:
     """Get Supabase URL and service role key from environment."""
-    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get(
-        "NEXT_PUBLIC_SUPABASE_URL"
-    )
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     return supabase_url or "", supabase_key or ""
 
@@ -29,33 +26,14 @@ def get_user_token(config: RunnableConfig) -> str | None:
     return auth_user.get("access_token")
 
 
-# Re-export async functions from thread_context for backward compatibility
-# These are async and fetch from thread metadata in the database
-from thread_context import get_project_db_id_from_thread as get_project_db_id_async
-from thread_context import get_qc_project_id_from_thread as get_qc_project_id_async
-
-
 def get_project_db_id(config: RunnableConfig) -> str | None:
-    """DEPRECATED: Use get_project_db_id_async instead.
-
-    This sync version only checks config.configurable and env vars,
-    it cannot fetch from thread metadata.
-    """
-    if config is None or not isinstance(config, dict):
-        return os.environ.get("PROJECT_DB_ID")
+    """Extract project_db_id from config."""
     configurable = config.get("configurable", {})
     return configurable.get("project_db_id") or os.environ.get("PROJECT_DB_ID")
 
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """DEPRECATED: Use get_qc_project_id_async instead.
-
-    This sync version only checks config.configurable and env vars,
-    it cannot fetch from thread metadata.
-    """
-    if config is None or not isinstance(config, dict):
-        env_id = os.environ.get("QC_PROJECT_ID")
-        return int(env_id) if env_id else None
+    """Extract qc_project_id from RunnableConfig."""
     configurable = config.get("configurable", {})
     project_id = configurable.get("qc_project_id")
     if project_id is not None:
@@ -85,11 +63,7 @@ class SupabaseClient:
         else:
             self.token = get_user_token(config) or self.service_role_key
 
-        self.anon_key = (
-            os.environ.get("SUPABASE_ANON_KEY")
-            or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-            or ""
-        )
+        self.anon_key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or ""
 
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
@@ -238,8 +212,6 @@ class SupabaseClient:
         url = f"{self.supabase_url}/rest/v1/rpc/{function_name}"
 
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                url, json=params or {}, headers=self._headers()
-            )
+            response = await client.post(url, json=params or {}, headers=self._headers())
             response.raise_for_status()
             return response.json()
