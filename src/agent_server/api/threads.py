@@ -205,6 +205,12 @@ async def get_thread(
     )
 
 
+class ThreadUpdate(BaseModel):
+    """Request model for updating thread metadata"""
+
+    metadata: dict[str, Any] | None = None
+
+
 @router.patch("/threads/{thread_id}", response_model=Thread)
 async def update_thread(
     thread_id: str,
@@ -218,7 +224,6 @@ async def update_thread(
     This performs a deep merge of the provided metadata into the existing metadata
     and updates the 'updated_at' timestamp.
     """
-    # 1. Fetch thread
     stmt = select(ThreadORM).where(
         ThreadORM.thread_id == thread_id, ThreadORM.user_id == user.identity
     )
@@ -227,20 +232,15 @@ async def update_thread(
     if not thread:
         raise HTTPException(404, f"Thread '{thread_id}' not found")
 
-    # 2. Update timestamp
+    # Update timestamp
     thread.updated_at = datetime.now(UTC)
 
-    # 3. Merge metadata
+    # Merge metadata
     if request.metadata:
-        # Ensure we work with a dict
         current_metadata = dict(thread.metadata_json or {})
-
-        # Merge new values (updates existing keys, adds new ones)
         current_metadata.update(request.metadata)
-
         thread.metadata_json = current_metadata
 
-    # 4. Save and return
     await session.commit()
     await session.refresh(thread)
 
