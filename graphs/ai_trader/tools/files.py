@@ -2,12 +2,20 @@
 
 import json
 
-from langgraph.runtime import get_runtime
+from langchain_core.tools import tool
 
-from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
 
 
+def _get_qc_project_id():
+    """Get QC project ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("qc_project_id")
+
+
+@tool
 async def create_file(file_name: str, content: str) -> str:
     """
     Create a new file in the QuantConnect project.
@@ -17,8 +25,7 @@ async def create_file(file_name: str, content: str) -> str:
         content: Full content of the file
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -44,6 +51,7 @@ async def create_file(file_name: str, content: str) -> str:
         return json.dumps({"error": True, "message": f"Failed to create file: {e!s}"})
 
 
+@tool
 async def read_file(file_name: str) -> str:
     """
     Read a file from the QuantConnect project.
@@ -53,8 +61,7 @@ async def read_file(file_name: str) -> str:
         file_name: Name of the file to read, or "*" for all files
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -109,6 +116,7 @@ async def read_file(file_name: str) -> str:
         return json.dumps({"error": True, "message": f"Failed to read file: {e!s}"})
 
 
+@tool
 async def update_file(file_name: str, content: str) -> str:
     """
     Update an existing file in the QuantConnect project.
@@ -118,8 +126,7 @@ async def update_file(file_name: str, content: str) -> str:
         content: New full content for the file
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -145,6 +152,7 @@ async def update_file(file_name: str, content: str) -> str:
         return json.dumps({"error": True, "message": f"Failed to update file: {e!s}"})
 
 
+@tool
 async def rename_file(old_file_name: str, new_file_name: str) -> str:
     """
     Rename a file in the QuantConnect project.
@@ -154,8 +162,7 @@ async def rename_file(old_file_name: str, new_file_name: str) -> str:
         new_file_name: New name for the file
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -193,6 +200,7 @@ async def rename_file(old_file_name: str, new_file_name: str) -> str:
         )
 
 
+@tool
 async def delete_file(file_name: str) -> str:
     """
     Delete a file from the QuantConnect project.
@@ -201,8 +209,7 @@ async def delete_file(file_name: str) -> str:
         file_name: Name of the file to delete
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})

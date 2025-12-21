@@ -7,10 +7,12 @@ import os
 import time
 
 import httpx
+from langchain_core.tools import tool
 
 from ai_trader.qc_api import qc_request
 
 
+@tool
 async def upload_object(key: str, content: str) -> str:
     """
     Upload data to QuantConnect object store.
@@ -78,6 +80,7 @@ async def upload_object(key: str, content: str) -> str:
         return json.dumps({"error": True, "message": f"Failed to upload object: {e!s}"})
 
 
+@tool
 async def read_object_properties(key: str) -> str:
     """
     Read object store file metadata.
@@ -103,6 +106,7 @@ async def read_object_properties(key: str) -> str:
         )
 
 
+@tool
 async def list_object_store_files(path: str = "") -> str:
     """
     List object store files and get their keys.
@@ -128,6 +132,7 @@ async def list_object_store_files(path: str = "") -> str:
         )
 
 
+@tool
 async def delete_object(key: str) -> str:
     """
     Delete an object from the QuantConnect object store.
