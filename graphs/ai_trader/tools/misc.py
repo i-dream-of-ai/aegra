@@ -7,7 +7,11 @@ from langgraph.types import interrupt
 
 from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import SupabaseClient, get_project_db_id, get_qc_project_id
+from ai_trader.supabase_client import (
+    SupabaseClient,
+    get_project_db_id,
+    get_qc_project_id,
+)
 
 
 async def wait(reason: str) -> str:
@@ -17,10 +21,12 @@ async def wait(reason: str) -> str:
     Args:
         reason: Why we are waiting (e.g., "Waiting for backtest result")
     """
-    result = interrupt({
-        "type": "check_inbox",
-        "reason": reason,
-    })
+    result = interrupt(
+        {
+            "type": "check_inbox",
+            "reason": reason,
+        }
+    )
     return result if result else json.dumps({"status": "no_update"})
 
 
@@ -35,12 +41,18 @@ async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
     try:
         project_db_id = get_project_db_id()
         if not project_db_id:
-            return json.dumps({"error": True, "message": "Project database ID not found."})
+            return json.dumps(
+                {"error": True, "message": "Project database ID not found."}
+            )
 
         client = SupabaseClient()
         all_versions = await client.select(
             "code_versions",
-            {"select": "*", "project_id": f"eq.{project_db_id}", "order": "created_at.desc"},
+            {
+                "select": "*",
+                "project_id": f"eq.{project_db_id}",
+                "order": "created_at.desc",
+            },
         )
 
         total = len(all_versions)
@@ -57,33 +69,40 @@ async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
 
         versions = []
         for i, v in enumerate(page_versions):
-            versions.append({
-                "rank": start + i + 1,
-                "id": v.get("id"),
-                "backtest_name": v.get("backtest_name") or v.get("name"),
-                "backtest_id": v.get("backtest_id"),
-                "metrics": {
-                    "total_return": format_percent(v.get("total_return")),
-                    "sharpe_ratio": format_decimal(v.get("sharpe_ratio")),
-                    "max_drawdown": format_percent(v.get("max_drawdown")),
-                    "win_rate": format_percent(v.get("win_rate")),
-                    "total_trades": v.get("total_trades"),
-                },
-                "created_at": v.get("created_at"),
-            })
+            versions.append(
+                {
+                    "rank": start + i + 1,
+                    "id": v.get("id"),
+                    "backtest_name": v.get("backtest_name") or v.get("name"),
+                    "backtest_id": v.get("backtest_id"),
+                    "metrics": {
+                        "total_return": format_percent(v.get("total_return")),
+                        "sharpe_ratio": format_decimal(v.get("sharpe_ratio")),
+                        "max_drawdown": format_percent(v.get("max_drawdown")),
+                        "win_rate": format_percent(v.get("win_rate")),
+                        "total_trades": v.get("total_trades"),
+                    },
+                    "created_at": v.get("created_at"),
+                }
+            )
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                },
+                "versions": versions,
             },
-            "versions": versions,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code versions: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to get code versions: {e!s}"}
+        )
 
 
 async def get_code_version(version_id: int) -> str:
@@ -104,12 +123,16 @@ async def get_code_version(version_id: int) -> str:
         )
 
         if not data:
-            return json.dumps({"error": True, "message": f"Code version {version_id} not found."})
+            return json.dumps(
+                {"error": True, "message": f"Code version {version_id} not found."}
+            )
 
         return json.dumps(data[0], indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code version: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to get code version: {e!s}"}
+        )
 
 
 async def read_project_nodes() -> str:
@@ -123,7 +146,9 @@ async def read_project_nodes() -> str:
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read project nodes: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read project nodes: {e!s}"}
+        )
 
 
 async def update_project_nodes(nodes: list[str]) -> str:
@@ -138,11 +163,17 @@ async def update_project_nodes(nodes: list[str]) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        await qc_request("/projects/nodes/update", {"projectId": qc_project_id, "nodes": nodes})
-        return json.dumps({"success": True, "message": f"Updated project nodes: {nodes}"})
+        await qc_request(
+            "/projects/nodes/update", {"projectId": qc_project_id, "nodes": nodes}
+        )
+        return json.dumps(
+            {"success": True, "message": f"Updated project nodes: {nodes}"}
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update project nodes: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update project nodes: {e!s}"}
+        )
 
 
 async def read_lean_versions() -> str:
@@ -156,8 +187,17 @@ async def read_lean_versions() -> str:
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read LEAN versions: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read LEAN versions: {e!s}"}
+        )
 
 
 # Export all tools
-TOOLS = [wait, get_code_versions, get_code_version, read_project_nodes, update_project_nodes, read_lean_versions]
+TOOLS = [
+    wait,
+    get_code_versions,
+    get_code_version,
+    read_project_nodes,
+    update_project_nodes,
+    read_lean_versions,
+]

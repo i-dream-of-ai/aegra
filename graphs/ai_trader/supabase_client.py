@@ -172,9 +172,7 @@ class SupabaseClient:
         headers["Prefer"] = "return=representation"
 
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.patch(
-                url, params=match, json=data, headers=headers
-            )
+            response = await client.patch(url, params=match, json=data, headers=headers)
             response.raise_for_status()
             return response.json() or []
 

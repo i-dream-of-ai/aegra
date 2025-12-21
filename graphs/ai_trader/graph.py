@@ -53,9 +53,7 @@ ALL_TOOLS = (
 )
 
 
-async def fetch_agent_config(
-    state: State, *, runtime: Runtime[Context]
-) -> dict:
+async def fetch_agent_config(state: State, *, runtime: Runtime[Context]) -> dict:
     """
     Fetch agent configuration from the database and update runtime context.
 
@@ -107,9 +105,7 @@ async def fetch_agent_config(
     return {}
 
 
-async def subconscious_node(
-    state: State, *, runtime: Runtime[Context]
-) -> dict:
+async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
     """
     Subconscious injection - retrieves relevant skills and behaviors.
 
@@ -170,10 +166,14 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
     # Build system message
     system_content = ctx.system_prompt
     if state.subconscious_context:
-        system_content += f"\n\n<injected_context>\n{state.subconscious_context}\n</injected_context>"
+        system_content += (
+            f"\n\n<injected_context>\n{state.subconscious_context}\n</injected_context>"
+        )
 
     # Create the model
-    model_name = ctx.model or os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    model_name = ctx.model or os.environ.get(
+        "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
+    )
 
     model_kwargs = {
         "model": model_name,
