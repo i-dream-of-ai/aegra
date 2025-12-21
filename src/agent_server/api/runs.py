@@ -127,6 +127,8 @@ async def update_thread_metadata(
     assistant_id: str,
     graph_id: str,
     user_id: str | None = None,
+    project_id: str | None = None,
+    qc_project_id: int | None = None,
 ) -> None:
     """Update thread metadata with assistant and graph information (dialect agnostic).
 
@@ -148,6 +150,11 @@ async def update_thread_metadata(
             "graph_id": graph_id,
             "thread_name": "",
         }
+        # Add project IDs if provided (for filtering threads by project)
+        if project_id:
+            metadata["project_id"] = project_id
+        if qc_project_id:
+            metadata["qc_project_id"] = qc_project_id
 
         thread_orm = ThreadORM(
             thread_id=thread_id,
@@ -166,6 +173,12 @@ async def update_thread_metadata(
             "graph_id": graph_id,
         }
     )
+    # Update project IDs if provided and not already set
+    if project_id and not md.get("project_id"):
+        md["project_id"] = project_id
+    if qc_project_id and not md.get("qc_project_id"):
+        md["qc_project_id"] = qc_project_id
+
     await session.execute(
         update(ThreadORM)
         .where(ThreadORM.thread_id == thread_id)
@@ -253,10 +266,21 @@ async def create_run(
             404, f"Graph '{assistant.graph_id}' not found for assistant"
         )
 
+    # Extract project IDs from request metadata for thread filtering
+    request_metadata = request.metadata or {}
+    project_id = request_metadata.get("project_id")
+    qc_project_id = request_metadata.get("qc_project_id")
+
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
     await update_thread_metadata(
-        session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity
+        session,
+        thread_id,
+        assistant.assistant_id,
+        assistant.graph_id,
+        user.identity,
+        project_id=project_id,
+        qc_project_id=qc_project_id,
     )
     await set_thread_status(session, thread_id, "busy")
 
@@ -384,10 +408,21 @@ async def create_and_stream_run(
             404, f"Graph '{assistant.graph_id}' not found for assistant"
         )
 
+    # Extract project IDs from request metadata for thread filtering
+    request_metadata = request.metadata or {}
+    project_id = request_metadata.get("project_id")
+    qc_project_id = request_metadata.get("qc_project_id")
+
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
     await update_thread_metadata(
-        session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity
+        session,
+        thread_id,
+        assistant.assistant_id,
+        assistant.graph_id,
+        user.identity,
+        project_id=project_id,
+        qc_project_id=qc_project_id,
     )
     await set_thread_status(session, thread_id, "busy")
 
@@ -703,10 +738,21 @@ async def wait_for_run(
             404, f"Graph '{assistant.graph_id}' not found for assistant"
         )
 
+    # Extract project IDs from request metadata for thread filtering
+    request_metadata = request.metadata or {}
+    project_id = request_metadata.get("project_id")
+    qc_project_id = request_metadata.get("qc_project_id")
+
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
     await update_thread_metadata(
-        session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity
+        session,
+        thread_id,
+        assistant.assistant_id,
+        assistant.graph_id,
+        user.identity,
+        project_id=project_id,
+        qc_project_id=qc_project_id,
     )
     await set_thread_status(session, thread_id, "busy")
 

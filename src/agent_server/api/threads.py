@@ -170,6 +170,53 @@ async def get_thread(
     )
 
 
+class ThreadUpdate(BaseModel):
+    """Request model for updating thread metadata"""
+
+    metadata: dict[str, Any] | None = None
+
+
+@router.patch("/threads/{thread_id}", response_model=Thread)
+async def update_thread(
+    thread_id: str,
+    request: ThreadUpdate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Update thread metadata (e.g., title)"""
+    stmt = select(ThreadORM).where(
+        ThreadORM.thread_id == thread_id, ThreadORM.user_id == user.identity
+    )
+    thread = await session.scalar(stmt)
+    if not thread:
+        raise HTTPException(404, f"Thread '{thread_id}' not found")
+
+    # Merge new metadata with existing
+    if request.metadata:
+        existing_metadata = dict(thread.metadata_json or {})
+        existing_metadata.update(request.metadata)
+
+        from sqlalchemy import update
+
+        await session.execute(
+            update(ThreadORM)
+            .where(ThreadORM.thread_id == thread_id)
+            .values(
+                metadata_json=existing_metadata,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+        await session.refresh(thread)
+
+    return Thread.model_validate(
+        {
+            **{c.name: getattr(thread, c.name) for c in thread.__table__.columns},
+            "metadata": thread.metadata_json,
+        }
+    )
+
+
 @router.get("/threads/{thread_id}/state", response_model=ThreadState)
 async def get_thread_state(
     thread_id: str,
