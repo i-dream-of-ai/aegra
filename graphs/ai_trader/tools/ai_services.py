@@ -9,7 +9,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from openai import AsyncOpenAI
 from qc_api import qc_request
-from supabase_client import SupabaseClient, get_qc_project_id
+from supabase_client import SupabaseClient
+from thread_context import get_qc_project_id_from_thread
 
 
 @tool
@@ -24,7 +25,7 @@ async def check_initialization_errors(
         code: Python code to check
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -61,7 +62,7 @@ async def complete_code(
         cursor_position: Cursor position in the code
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -102,7 +103,7 @@ async def enhance_error_message(
         code: Code context
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -141,7 +142,7 @@ async def check_syntax(
         code: Python code to check
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -176,7 +177,7 @@ async def update_code_to_pep8(
         code: Code to format
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -211,7 +212,7 @@ async def search_quantconnect(
         query: Search query
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 

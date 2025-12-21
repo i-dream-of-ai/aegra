@@ -7,16 +7,7 @@ from typing import Annotated
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
-
-
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
+from thread_context import get_qc_project_id_from_thread
 
 
 @tool
@@ -37,7 +28,7 @@ async def estimate_optimization(
         parallel_nodes: Number of parallel nodes (default: 6)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -114,7 +105,7 @@ async def create_optimization(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -336,7 +327,7 @@ async def list_optimizations(
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -398,7 +389,7 @@ async def update_optimization(
         name: New name
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -437,7 +428,7 @@ async def abort_optimization(
         optimization_id: The optimization ID to abort
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -472,7 +463,7 @@ async def delete_optimization(
         optimization_id: The optimization ID to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
