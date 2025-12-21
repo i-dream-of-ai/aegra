@@ -21,7 +21,6 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from langgraph.types import dispatch_custom_event
 
 from ai_trader.context import Context
 from ai_trader.state import InputState, State
@@ -144,18 +143,6 @@ async def fetch_agent_config(state: State, *, runtime: Runtime[Context]) -> dict
             reviewer_model=ctx.reviewer_model,
         )
 
-        # Emit event for the frontend
-        dispatch_custom_event(
-            "agent_config_loaded",
-            {
-                "project_id": ctx.project_db_id,
-                "model": ctx.model,
-                "thinking_budget": ctx.thinking_budget,
-                "verbosity": ctx.verbosity,
-                "reviewer_model": ctx.reviewer_model,
-            },
-        )
-
     except Exception as e:
         logger.warning("Failed to fetch agent config", error=str(e))
 
@@ -178,8 +165,7 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         return {}
 
     try:
-        # Emit thinking event for UI
-        dispatch_custom_event("subconscious_thinking", {"stage": "planning"})
+        logger.debug("Subconscious: planning")
 
         # Get the last user message for context
         last_message = None
@@ -189,7 +175,6 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
                 break
 
         if not last_message:
-            dispatch_custom_event("subconscious_thinking", {"stage": "done"})
             return {}
 
         # TODO: Implement actual subconscious retrieval
@@ -198,7 +183,7 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         # 2. RAG search over algorithm_knowledge_base
         # 3. Skill injection based on conversation context
 
-        dispatch_custom_event("subconscious_thinking", {"stage": "done"})
+        logger.debug("Subconscious: done")
 
         # Return any injected context as a system message
         # For now, return empty - the full implementation would return:
@@ -207,7 +192,6 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
 
     except Exception as e:
         logger.warning("Subconscious injection failed", error=str(e))
-        dispatch_custom_event("subconscious_thinking", {"stage": "done"})
         return {}
 
 
