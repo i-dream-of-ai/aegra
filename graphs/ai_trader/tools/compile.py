@@ -3,20 +3,27 @@
 import asyncio
 import json
 
-from langgraph.runtime import get_runtime
+from langchain_core.tools import tool
 
-from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
 
 
+def _get_qc_project_id():
+    """Get QC project ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("qc_project_id")
+
+
+@tool
 async def create_compile() -> str:
     """
     Compile the current project on QuantConnect.
     Returns the compile ID needed for backtests and optimizations.
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -75,6 +82,7 @@ async def create_compile() -> str:
         return json.dumps({"error": True, "message": f"Failed to compile: {e!s}"})
 
 
+@tool
 async def read_compile(compile_id: str) -> str:
     """
     Read compile status and logs.
@@ -83,8 +91,7 @@ async def read_compile(compile_id: str) -> str:
         compile_id: The compile ID to check
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})

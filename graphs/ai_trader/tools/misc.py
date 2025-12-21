@@ -2,16 +2,30 @@
 
 import json
 
+from langchain_core.tools import tool
 from langgraph.types import interrupt
 
 from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import (
-    SupabaseClient,
-    get_project_db_id,
-    get_qc_project_id,
-)
+from ai_trader.supabase_client import SupabaseClient
 
 
+def _get_qc_project_id():
+    """Get QC project ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("qc_project_id")
+
+
+def _get_project_db_id():
+    """Get project database ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("project_db_id")
+
+
+@tool
 async def wait(reason: str) -> str:
     """
     Pause execution to check for updates (tool results or user messages).
@@ -28,6 +42,7 @@ async def wait(reason: str) -> str:
     return result if result else json.dumps({"status": "no_update"})
 
 
+@tool
 async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
     """
     List saved code versions for this project with pagination.
@@ -37,7 +52,7 @@ async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        project_db_id = get_project_db_id()
+        project_db_id = _get_project_db_id()
         if not project_db_id:
             return json.dumps(
                 {"error": True, "message": "Project database ID not found."}
@@ -103,6 +118,7 @@ async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
         )
 
 
+@tool
 async def get_code_version(version_id: int) -> str:
     """
     Get a specific code version by ID.
@@ -133,10 +149,11 @@ async def get_code_version(version_id: int) -> str:
         )
 
 
+@tool
 async def read_project_nodes() -> str:
     """Read available and active nodes for the current QuantConnect project."""
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -149,6 +166,7 @@ async def read_project_nodes() -> str:
         )
 
 
+@tool
 async def update_project_nodes(nodes: list[str]) -> str:
     """
     Update the enabled nodes for a QuantConnect project.
@@ -157,7 +175,7 @@ async def update_project_nodes(nodes: list[str]) -> str:
         nodes: List of node identifiers (e.g., ["L1-1", "L1-2"])
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -174,10 +192,11 @@ async def update_project_nodes(nodes: list[str]) -> str:
         )
 
 
+@tool
 async def read_lean_versions() -> str:
     """Get available LEAN versions on QuantConnect."""
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 

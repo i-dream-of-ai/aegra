@@ -4,10 +4,17 @@ import asyncio
 import json
 import os
 
-from langgraph.runtime import get_runtime
+from langchain_core.tools import tool
 
-from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
+
+
+def _get_qc_project_id():
+    """Get QC project ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("qc_project_id")
 
 
 async def _poll_compile(
@@ -57,6 +64,7 @@ async def _poll_backtest(
     return None, None
 
 
+@tool
 async def compile_and_backtest(backtest_name: str) -> str:
     """
     Compile code and create a backtest using default parameter values.
@@ -65,8 +73,7 @@ async def compile_and_backtest(backtest_name: str) -> str:
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -117,6 +124,7 @@ async def compile_and_backtest(backtest_name: str) -> str:
         return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
 
 
+@tool
 async def compile_and_optimize(
     optimization_name: str,
     target: str,
@@ -139,8 +147,7 @@ async def compile_and_optimize(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -212,6 +219,7 @@ async def compile_and_optimize(
         return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
 
 
+@tool
 async def update_and_run_backtest(
     file_name: str, file_content: str, backtest_name: str
 ) -> str:
@@ -224,8 +232,7 @@ async def update_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]"
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -302,6 +309,7 @@ async def update_and_run_backtest(
         return json.dumps({"success": False, "error": str(e)})
 
 
+@tool
 async def edit_and_run_backtest(
     file_name: str, edits: list[dict], backtest_name: str
 ) -> str:
@@ -314,8 +322,7 @@ async def edit_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]"
     """
     try:
-        runtime = get_runtime(Context)
-        qc_project_id = runtime.context.qc_project_id
+        qc_project_id = _get_qc_project_id()
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:

@@ -5,12 +5,20 @@ import os
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.runtime import get_runtime
 
-from ai_trader.context import DEFAULT_REVIEWER_PROMPT, Context
+from ai_trader.context import DEFAULT_REVIEWER_PROMPT
 
 
+def _get_config():
+    """Get LangGraph config."""
+    from langgraph.config import get_config
+
+    return get_config()
+
+
+@tool
 async def request_code_review(code: str, backtest_results: str | None = None) -> str:
     """
     Request a code review from Doubtful Deacon.
@@ -24,14 +32,16 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
         backtest_results: Optional backtest results to analyze alongside the code
     """
     try:
-        runtime = get_runtime(Context)
-        ctx = runtime.context
+        config = _get_config()
+        configurable = config.get("configurable", {})
 
-        # Get reviewer configuration from context
-        reviewer_model = ctx.reviewer_model or os.environ.get(
+        # Get reviewer configuration from config
+        reviewer_model = configurable.get("reviewer_model") or os.environ.get(
             "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
         )
-        reviewer_prompt = ctx.reviewer_prompt or DEFAULT_REVIEWER_PROMPT
+        reviewer_prompt = configurable.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
+        reviewer_thinking_budget = configurable.get("reviewer_thinking_budget", 0)
+        reviewer_reasoning_effort = configurable.get("reviewer_reasoning_effort", "none")
 
         # Build the review request
         review_request = f"Review this algorithm code:\n\n```python\n{code}\n```"
@@ -50,10 +60,10 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
             }
 
             # Add extended thinking if configured for Claude reviewer
-            if ctx.reviewer_thinking_budget and ctx.reviewer_thinking_budget > 0:
+            if reviewer_thinking_budget and reviewer_thinking_budget > 0:
                 model_kwargs["thinking"] = {
                     "type": "enabled",
-                    "budget_tokens": ctx.reviewer_thinking_budget,
+                    "budget_tokens": reviewer_thinking_budget,
                 }
 
             model = ChatAnthropic(**model_kwargs)
@@ -66,11 +76,8 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
             }
 
             # Add reasoning effort for GPT models
-            if (
-                ctx.reviewer_reasoning_effort
-                and ctx.reviewer_reasoning_effort != "none"
-            ):
-                model_kwargs["reasoning_effort"] = ctx.reviewer_reasoning_effort
+            if reviewer_reasoning_effort and reviewer_reasoning_effort != "none":
+                model_kwargs["reasoning_effort"] = reviewer_reasoning_effort
 
             model = ChatOpenAI(**model_kwargs)
 

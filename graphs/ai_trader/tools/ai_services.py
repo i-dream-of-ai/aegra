@@ -4,12 +4,22 @@ import json
 import os
 import re
 
+from langchain_core.tools import tool
 from openai import AsyncOpenAI
 
 from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import SupabaseClient, get_qc_project_id
+from ai_trader.supabase_client import SupabaseClient
 
 
+def _get_qc_project_id():
+    """Get QC project ID from LangGraph config."""
+    from langgraph.config import get_config
+
+    config = get_config()
+    return config.get("configurable", {}).get("qc_project_id")
+
+
+@tool
 async def check_initialization_errors(code: str) -> str:
     """
     Check Python code for potential initialization errors.
@@ -18,7 +28,7 @@ async def check_initialization_errors(code: str) -> str:
         code: Python code to check
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -34,6 +44,7 @@ async def check_initialization_errors(code: str) -> str:
         )
 
 
+@tool
 async def complete_code(code: str, cursor_position: int) -> str:
     """
     AI code completion for QuantConnect algorithms.
@@ -43,7 +54,7 @@ async def complete_code(code: str, cursor_position: int) -> str:
         cursor_position: Cursor position in the code
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -63,6 +74,7 @@ async def complete_code(code: str, cursor_position: int) -> str:
         )
 
 
+@tool
 async def enhance_error_message(error_message: str, code: str) -> str:
     """
     Get enhanced error explanations with suggestions for fixes.
@@ -72,7 +84,7 @@ async def enhance_error_message(error_message: str, code: str) -> str:
         code: Code context
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -88,6 +100,7 @@ async def enhance_error_message(error_message: str, code: str) -> str:
         )
 
 
+@tool
 async def check_syntax(code: str) -> str:
     """
     Check Python code syntax for errors before compiling.
@@ -96,7 +109,7 @@ async def check_syntax(code: str) -> str:
         code: Python code to check
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -109,6 +122,7 @@ async def check_syntax(code: str) -> str:
         return json.dumps({"error": True, "message": f"Failed to check syntax: {e!s}"})
 
 
+@tool
 async def update_code_to_pep8(code: str) -> str:
     """
     Format Python code to PEP8 standards.
@@ -117,7 +131,7 @@ async def update_code_to_pep8(code: str) -> str:
         code: Code to format
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -132,6 +146,7 @@ async def update_code_to_pep8(code: str) -> str:
         )
 
 
+@tool
 async def search_quantconnect(query: str) -> str:
     """
     Search QuantConnect documentation.
@@ -140,7 +155,7 @@ async def search_quantconnect(query: str) -> str:
         query: Search query
     """
     try:
-        qc_project_id = get_qc_project_id()
+        qc_project_id = _get_qc_project_id()
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -162,6 +177,7 @@ async def _generate_embedding(text: str) -> list[float]:
     return response.data[0].embedding
 
 
+@tool
 async def search_local_algorithms(query: str, limit: int = 5) -> str:
     """
     Search ~1,500 QuantConnect algorithms using semantic search.
@@ -208,6 +224,7 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
         return json.dumps({"error": True, "message": f"Failed to search: {e!s}"})
 
 
+@tool
 async def get_algorithm_code(algorithm_id: str) -> str:
     """
     Get full code of an algorithm from the knowledge base.
