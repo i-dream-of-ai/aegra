@@ -154,6 +154,14 @@ class EventConverter:
         elif stream_mode == "debug":
             return create_debug_event(payload, event_id)
         elif stream_mode == "end":
+            # Pass the payload to end event - may contain error info
+            if isinstance(payload, dict) and payload.get("status") == "error":
+                # Error end event - include error message
+                return format_sse_message(
+                    "end",
+                    {"status": "error", "error": payload.get("error", "Unknown error")},
+                    event_id,
+                )
             return create_end_event(event_id)
         elif stream_mode == "error":
             return create_error_event(payload, event_id)
