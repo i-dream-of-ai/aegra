@@ -5,6 +5,7 @@ we store project IDs in thread metadata when creating/submitting to threads.
 Tools can then fetch this metadata directly from the database.
 """
 
+import json
 import os
 from functools import lru_cache
 
@@ -47,7 +48,14 @@ async def get_thread_metadata(thread_id: str) -> dict | None:
                 thread_id
             )
             if row:
-                return row["metadata_json"]
+                metadata = row["metadata_json"]
+                # Handle case where metadata_json is stored as TEXT instead of JSONB
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        return {"_error": f"Invalid JSON in metadata: {metadata[:100]}"}
+                return metadata if isinstance(metadata, dict) else {"_error": f"Unexpected metadata type: {type(metadata).__name__}"}
             return {"_error": f"Thread {thread_id} not found in database"}
         finally:
             await conn.close()
