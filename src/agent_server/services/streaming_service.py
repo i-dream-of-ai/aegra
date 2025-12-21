@@ -173,11 +173,18 @@ class StreamingService:
         self.event_counters[run_id] = counter
         event_id = generate_event_id(run_id, counter)
 
+        logger.info(
+            f"[signal_run_error] Sending error to broker run_id={run_id} error={error_message[:200]}"
+        )
+
         broker = broker_manager.get_or_create_broker(run_id)
         if broker:
             await broker.put(
                 event_id, ("end", {"status": "error", "error": error_message})
             )
+            logger.info(f"[signal_run_error] Error event put to broker run_id={run_id}")
+        else:
+            logger.warning(f"[signal_run_error] No broker found for run_id={run_id}")
 
         broker_manager.cleanup_broker(run_id)
 
