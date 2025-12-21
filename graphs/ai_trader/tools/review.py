@@ -29,7 +29,7 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
 
         # Get reviewer configuration from context
         reviewer_model = ctx.reviewer_model or os.environ.get(
-            "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
+            "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
         )
         reviewer_prompt = ctx.reviewer_prompt or DEFAULT_REVIEWER_PROMPT
 
