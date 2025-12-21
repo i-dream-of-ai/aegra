@@ -14,8 +14,15 @@ from langchain_core.runnables import RunnableConfig
 
 @lru_cache(maxsize=1)
 def get_database_url() -> str:
-    """Get database URL from environment."""
-    return os.environ.get("DATABASE_URL", "")
+    """Get database URL from environment.
+
+    Handles SQLAlchemy-style URLs (postgresql+asyncpg://) by stripping the driver suffix.
+    """
+    url = os.environ.get("DATABASE_URL", "")
+    # SQLAlchemy uses postgresql+asyncpg://, but asyncpg needs just postgresql://
+    if "+asyncpg" in url:
+        url = url.replace("+asyncpg", "")
+    return url
 
 
 async def get_thread_metadata(thread_id: str) -> dict | None:
@@ -29,7 +36,8 @@ async def get_thread_metadata(thread_id: str) -> dict | None:
     """
     db_url = get_database_url()
     if not db_url:
-        return None
+        # Return error info instead of silently returning None
+        return {"_error": "DATABASE_URL not set"}
 
     try:
         conn = await asyncpg.connect(db_url)
@@ -40,14 +48,15 @@ async def get_thread_metadata(thread_id: str) -> dict | None:
             )
             if row:
                 return row["metadata_json"]
-            return None
+            return {"_error": f"Thread {thread_id} not found in database"}
         finally:
             await conn.close()
     except Exception as e:
         import structlog
         logger = structlog.get_logger()
         logger.warning(f"Failed to fetch thread metadata: {e}")
-        return None
+        # Return error info for debugging
+        return {"_error": str(e), "_db_url_prefix": db_url[:30] + "..." if db_url else "empty"}
 
 
 async def get_qc_project_id_from_thread(config: RunnableConfig) -> int | None:
