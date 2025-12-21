@@ -219,18 +219,25 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
     is_claude = model_name.startswith("claude")
 
     if is_claude:
+        # Base max_tokens - will be increased if thinking is enabled
+        base_max_tokens = 8192
+
         model_kwargs = {
             "model": model_name,
             "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-            "max_tokens": 8192,
         }
 
         # Add extended thinking if configured
+        # max_tokens must be greater than thinking.budget_tokens
         if ctx.thinking_budget > 0:
             model_kwargs["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": ctx.thinking_budget,
             }
+            # Ensure max_tokens > thinking_budget
+            model_kwargs["max_tokens"] = max(base_max_tokens, ctx.thinking_budget + 4096)
+        else:
+            model_kwargs["max_tokens"] = base_max_tokens
 
         model = ChatAnthropic(**model_kwargs)
     else:
