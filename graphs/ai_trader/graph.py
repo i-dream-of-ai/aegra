@@ -25,7 +25,6 @@ import httpx
 import structlog
 from langchain.agents import create_agent as langchain_create_agent
 from langchain.agents.middleware import (
-    HumanInTheLoopMiddleware,
     ModelRequest,
     ModelResponse,
     SummarizationMiddleware,
@@ -747,22 +746,6 @@ async def message_sanitization_middleware(
 
 
 # =============================================================================
-# HITL CONFIGURATION
-# =============================================================================
-
-
-def build_hitl_interrupt_config() -> dict:
-    """Build interrupt config for all tools."""
-    interrupt_on = {}
-    for tool in TOOLS:
-        tool_name = tool.name if hasattr(tool, "name") else str(tool)
-        interrupt_on[tool_name] = {
-            "allowed_decisions": ["approve", "edit", "reject"],
-        }
-    return interrupt_on
-
-
-# =============================================================================
 # MAIN AGENT (Shooby Dooby)
 # =============================================================================
 
@@ -779,7 +762,6 @@ def create_main_agent():
     - Summarization for context management
     """
     default_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    hitl_config = build_hitl_interrupt_config()
 
     agent = langchain_create_agent(
         model=default_model,
@@ -790,10 +772,6 @@ def create_main_agent():
             message_sanitization_middleware,
             dynamic_config_middleware,
             subconscious_injection_middleware,
-            HumanInTheLoopMiddleware(
-                interrupt_on=hitl_config,
-                description_prefix="Tool execution pending",
-            ),
             SummarizationMiddleware(
                 model="claude-haiku-4-5-20251001",
                 trigger=("tokens", 100000),
