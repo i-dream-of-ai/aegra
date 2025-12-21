@@ -132,11 +132,19 @@ async def read_backtest(
             {"projectId": qc_project_id, "backtestId": backtest_id},
         )
 
+        # Ensure result is a dict
+        if not isinstance(result, dict):
+            return json.dumps({"error": True, "message": f"Unexpected API response type: {type(result).__name__}", "raw": str(result)[:200]})
+
         backtest = result.get("backtest", {})
         if isinstance(backtest, list):
             backtest = backtest[0] if backtest else {}
+        if not isinstance(backtest, dict):
+            return json.dumps({"error": True, "message": f"Unexpected backtest type: {type(backtest).__name__}", "raw": str(backtest)[:200]})
 
         stats = backtest.get("statistics", {})
+        if not isinstance(stats, dict):
+            stats = {}
 
         return json.dumps(
             {
