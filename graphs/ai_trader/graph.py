@@ -58,6 +58,7 @@ class AgentContext:
 
     # Project context
     project_db_id: str | None = None
+    qc_project_id: int | None = None
 
     # Feature flags
     subconscious_enabled: bool = True
