@@ -14,14 +14,6 @@ if str(_parent_dir) not in sys.path:
     sys.path.insert(0, str(_parent_dir))
 
 # Files
-from .files import (
-    create_file,
-    delete_file,
-    read_file,
-    rename_file,
-    update_file,
-)
-
 # AI Services
 from .ai_services import (
     check_initialization_errors,
@@ -55,6 +47,13 @@ from .composite import (
     compile_and_optimize,
     edit_and_run_backtest,
     update_and_run_backtest,
+)
+from .files import (
+    create_file,
+    delete_file,
+    read_file,
+    rename_file,
+    update_file,
 )
 
 # Misc

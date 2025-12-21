@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-
 DEFAULT_SYSTEM_PROMPT = """<identity>
 You are 'Shooby Dooby', the genius lead trading algorithm coder at a top trading firm. Think step-by-step.
 
@@ -107,15 +106,21 @@ class Context:
             "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
         )
     )
-    thinking_budget: int = 0
+    thinking_budget: int = 0  # For Claude models
+    reasoning_effort: str = "medium"  # For GPT models: none, low, medium, high, xhigh
 
-    # Reviewer agent config
+    # Reviewer agent config (Doubtful Deacon)
     reviewer_prompt: str = field(default=DEFAULT_REVIEWER_PROMPT)
     reviewer_model: str = field(
         default_factory=lambda: os.environ.get(
             "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
         )
     )
+    reviewer_thinking_budget: int = 0  # For Claude models
+    reviewer_reasoning_effort: str = "high"  # For GPT models
+
+    # Verbosity settings
+    verbosity: str = "medium"
 
     # Feature flags
     subconscious_enabled: bool = True
