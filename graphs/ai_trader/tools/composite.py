@@ -1,42 +1,25 @@
 """Composite tools that combine multiple operations."""
 
-import asyncio
-import json
 import os
+import json
+import asyncio
 from typing import Annotated
-
+from langchain_core.tools import tool, InjectedToolArg
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
 
 
-from thread_context import get_qc_project_id_from_thread, get_thread_metadata
+def get_qc_project_id(config: RunnableConfig) -> int | None:
+    """Extract qc_project_id from RunnableConfig."""
+    configurable = config.get("configurable", {})
+    project_id = configurable.get("qc_project_id")
+    if project_id is not None:
+        return int(project_id)
+    env_id = os.environ.get("QC_PROJECT_ID")
+    return int(env_id) if env_id else None
 
 
-async def no_project_error(config: RunnableConfig) -> str:
-    """Return a JSON error with debug info when project context is missing."""
-    configurable = config.get("configurable", {}) if config else {}
-    thread_id = configurable.get("thread_id")
-    thread_metadata = None
-    if thread_id:
-        thread_metadata = await get_thread_metadata(thread_id)
-
-    debug_info = {
-        "config_keys": list(config.keys()) if config else [],
-        "configurable_keys": list(configurable.keys()),
-        "thread_id": thread_id,
-        "thread_metadata": thread_metadata,
-    }
-    return json.dumps({
-        "error": True,
-        "message": "No project context in thread metadata.",
-        "debug": debug_info,
-    })
-
-
-async def _poll_compile(
-    qc_project_id: int, compile_id: str, timeout: int = 30
-) -> tuple[bool, str | None]:
+async def _poll_compile(qc_project_id: int, compile_id: str, timeout: int = 30) -> tuple[bool, str | None]:
     """
     Poll for compile completion.
 
@@ -61,9 +44,7 @@ async def _poll_compile(
     return False, "Compilation timed out"
 
 
-async def _poll_backtest(
-    qc_project_id: int, backtest_id: str, timeout: int = 60
-) -> tuple[dict | None, str | None]:
+async def _poll_backtest(qc_project_id: int, backtest_id: str, timeout: int = 60) -> tuple[dict | None, str | None]:
     """
     Poll for backtest completion.
 
@@ -104,11 +85,11 @@ async def compile_and_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = await get_qc_project_id_from_thread(config)
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return await no_project_error(config)
+            return json.dumps({"error": True, "message": "No project context."})
 
         # Step 1: Compile
         try:
@@ -119,21 +100,17 @@ async def compile_and_backtest(
             if not compile_id:
                 return json.dumps({"error": True, "message": "No compile ID returned."})
         except Exception as e:
-            return json.dumps(
-                {"error": True, "message": f"Failed to compile: {str(e)}"}
-            )
+            return json.dumps({"error": True, "message": f"Failed to compile: {str(e)}"})
 
         # Step 2: Poll compile
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
 
         if not is_compiled:
-            return json.dumps(
-                {
-                    "error": True,
-                    "compile_id": compile_id,
-                    "message": f"Compilation failed: {compile_error}",
-                }
-            )
+            return json.dumps({
+                "error": True,
+                "compile_id": compile_id,
+                "message": f"Compilation failed: {compile_error}",
+            })
 
         # Step 3: Create backtest
         try:
@@ -151,23 +128,19 @@ async def compile_and_backtest(
                 backtest = backtest[0] if backtest else {}
             backtest_id = backtest.get("backtestId")
 
-            return json.dumps(
-                {
-                    "success": True,
-                    "compile_id": compile_id,
-                    "backtest_id": backtest_id,
-                    "backtest_name": backtest_name,
-                    "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
-                }
-            )
+            return json.dumps({
+                "success": True,
+                "compile_id": compile_id,
+                "backtest_id": backtest_id,
+                "backtest_name": backtest_name,
+                "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
+            })
         except Exception as e:
-            return json.dumps(
-                {
-                    "error": True,
-                    "compile_id": compile_id,
-                    "message": f"Failed to create backtest: {str(e)}",
-                }
-            )
+            return json.dumps({
+                "error": True,
+                "compile_id": compile_id,
+                "message": f"Failed to create backtest: {str(e)}",
+            })
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Unexpected error: {str(e)}"})
@@ -198,24 +171,17 @@ async def compile_and_optimize(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = await get_qc_project_id_from_thread(config)
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return await no_project_error(config)
+            return json.dumps({"error": True, "message": "No project context."})
 
         if not parameters or len(parameters) == 0:
-            return json.dumps(
-                {"error": True, "message": "At least one parameter is required."}
-            )
+            return json.dumps({"error": True, "message": "At least one parameter is required."})
 
         if len(parameters) > 3:
-            return json.dumps(
-                {
-                    "error": True,
-                    "message": "QC limits optimizations to 3 parameters max.",
-                }
-            )
+            return json.dumps({"error": True, "message": "QC limits optimizations to 3 parameters max."})
 
         # Step 1: Compile
         try:
@@ -224,21 +190,17 @@ async def compile_and_optimize(
             )
             compile_id = compile_data.get("compileId")
         except Exception as e:
-            return json.dumps(
-                {"error": True, "message": f"Failed to compile: {str(e)}"}
-            )
+            return json.dumps({"error": True, "message": f"Failed to compile: {str(e)}"})
 
         # Step 2: Poll compile
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
 
         if not is_compiled:
-            return json.dumps(
-                {
-                    "error": True,
-                    "compile_id": compile_id,
-                    "message": f"Compilation failed: {compile_error}",
-                }
-            )
+            return json.dumps({
+                "error": True,
+                "compile_id": compile_id,
+                "message": f"Compilation failed: {compile_error}",
+            })
 
         # Transform constraint operators
         operator_map = {
@@ -250,21 +212,13 @@ async def compile_and_optimize(
             "notequal": "NotEqual",
         }
         transformed_constraints = []
-        for c in constraints or []:
-            op = (
-                c.get("operator", "")
-                .lower()
-                .replace("_", "")
-                .replace("-", "")
-                .replace(" ", "")
-            )
-            transformed_constraints.append(
-                {
-                    "target": c["target"],
-                    "operator": operator_map.get(op, c["operator"]),
-                    "targetValue": c["targetValue"],
-                }
-            )
+        for c in (constraints or []):
+            op = c.get("operator", "").lower().replace("_", "").replace("-", "").replace(" ", "")
+            transformed_constraints.append({
+                "target": c["target"],
+                "operator": operator_map.get(op, c["operator"]),
+                "targetValue": c["targetValue"],
+            })
 
         # Step 3: Create optimization
         try:
@@ -286,9 +240,7 @@ async def compile_and_optimize(
                 },
             )
 
-            opt_id = result.get("optimizations", [{}])[0].get(
-                "optimizationId"
-            ) or result.get("optimizationId")
+            opt_id = result.get("optimizations", [{}])[0].get("optimizationId") or result.get("optimizationId")
 
             # Calculate estimated runs
             estimated_runs = 1
@@ -296,28 +248,23 @@ async def compile_and_optimize(
                 steps = ((p.get("max", 100) - p.get("min", 0)) // p.get("step", 1)) + 1
                 estimated_runs *= steps
 
-            return json.dumps(
-                {
-                    "success": True,
-                    "compile_id": compile_id,
-                    "optimization_id": opt_id,
-                    "optimization_name": optimization_name,
-                    "target": target,
-                    "target_to": target_to,
-                    "estimated_backtests": estimated_runs,
-                    "status": "running",
-                    "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
-                },
-                indent=2,
-            )
+            return json.dumps({
+                "success": True,
+                "compile_id": compile_id,
+                "optimization_id": opt_id,
+                "optimization_name": optimization_name,
+                "target": target,
+                "target_to": target_to,
+                "estimated_backtests": estimated_runs,
+                "status": "running",
+                "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
+            }, indent=2)
         except Exception as e:
-            return json.dumps(
-                {
-                    "error": True,
-                    "compile_id": compile_id,
-                    "message": f"Failed to create optimization: {str(e)}",
-                }
-            )
+            return json.dumps({
+                "error": True,
+                "compile_id": compile_id,
+                "message": f"Failed to create optimization: {str(e)}",
+            })
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Unexpected error: {str(e)}"})
@@ -345,7 +292,7 @@ async def update_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = await get_qc_project_id_from_thread(config)
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -365,13 +312,11 @@ async def update_and_run_backtest(
                 },
             )
         except Exception as e:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "file_update",
-                    "error": f"Failed to update {file_name}: {str(e)}",
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "file_update",
+                "error": f"Failed to update {file_name}: {str(e)}",
+            })
 
         # Step 2: Create compile
         try:
@@ -380,47 +325,39 @@ async def update_and_run_backtest(
             )
             compile_id = compile_data.get("compileId")
             if not compile_id:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "step": "compile_create",
-                        "error": "No compile ID returned",
-                        "file_updated": file_name,
-                    }
-                )
-        except Exception as e:
-            return json.dumps(
-                {
+                return json.dumps({
                     "success": False,
                     "step": "compile_create",
-                    "error": f"Failed to compile: {str(e)}",
+                    "error": "No compile ID returned",
                     "file_updated": file_name,
-                }
-            )
+                })
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "step": "compile_create",
+                "error": f"Failed to compile: {str(e)}",
+                "file_updated": file_name,
+            })
 
         # Step 3: Poll for compilation
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
 
         if not is_compiled:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "compilation",
-                    "compile_id": compile_id,
-                    "error": f"Compilation failed: {compile_error}",
-                    "file_updated": file_name,
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "compilation",
+                "compile_id": compile_id,
+                "error": f"Compilation failed: {compile_error}",
+                "file_updated": file_name,
+            })
 
         # Step 4: Create backtest
         if not org_id:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "backtest_create",
-                    "error": "Missing QUANTCONNECT_ORGANIZATION_ID",
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "backtest_create",
+                "error": "Missing QUANTCONNECT_ORGANIZATION_ID",
+            })
 
         try:
             backtest_data = await qc_request(
@@ -438,83 +375,68 @@ async def update_and_run_backtest(
             backtest_id = backtest.get("backtestId")
 
             if not backtest_id:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "step": "backtest_create",
-                        "compile_id": compile_id,
-                        "error": "No backtest ID returned",
-                    }
-                )
-        except Exception as e:
-            return json.dumps(
-                {
+                return json.dumps({
                     "success": False,
                     "step": "backtest_create",
                     "compile_id": compile_id,
-                    "error": f"Failed to create backtest: {str(e)}",
-                }
-            )
+                    "error": "No backtest ID returned",
+                })
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "step": "backtest_create",
+                "compile_id": compile_id,
+                "error": f"Failed to create backtest: {str(e)}",
+            })
 
         # Step 5: Poll for backtest completion
-        backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id
-        )
+        backtest_result, backtest_error = await _poll_backtest(qc_project_id, backtest_id)
 
         if backtest_error:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "backtest_execution",
-                    "file_updated": file_name,
-                    "compile_id": compile_id,
-                    "backtest_id": backtest_id,
-                    "error": f"Backtest failed: {backtest_error}",
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "backtest_execution",
+                "file_updated": file_name,
+                "compile_id": compile_id,
+                "backtest_id": backtest_id,
+                "error": f"Backtest failed: {backtest_error}",
+            })
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
-            return json.dumps(
-                {
-                    "success": True,
-                    "file_updated": file_name,
-                    "compile_id": compile_id,
-                    "backtest_id": backtest_id,
-                    "backtest_name": backtest_name,
-                    "completed": True,
-                    "statistics": {
-                        "net_profit": stats.get("Net Profit", "N/A"),
-                        "cagr": stats.get("Compounding Annual Return", "N/A"),
-                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                        "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "win_rate": stats.get("Win Rate", "N/A"),
-                        "total_trades": stats.get("Total Trades", "N/A"),
-                    },
-                    "message": f"Updated {file_name}, compiled, and backtest completed!",
-                },
-                indent=2,
-            )
-
-        return json.dumps(
-            {
+            return json.dumps({
                 "success": True,
                 "file_updated": file_name,
                 "compile_id": compile_id,
                 "backtest_id": backtest_id,
                 "backtest_name": backtest_name,
-                "status": "Running",
-                "message": "Backtest started. Use read_backtest to check results.",
-            }
-        )
+                "completed": True,
+                "statistics": {
+                    "net_profit": stats.get("Net Profit", "N/A"),
+                    "cagr": stats.get("Compounding Annual Return", "N/A"),
+                    "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
+                    "max_drawdown": stats.get("Drawdown", "N/A"),
+                    "win_rate": stats.get("Win Rate", "N/A"),
+                    "total_trades": stats.get("Total Trades", "N/A"),
+                },
+                "message": f"Updated {file_name}, compiled, and backtest completed!",
+            }, indent=2)
+
+        return json.dumps({
+            "success": True,
+            "file_updated": file_name,
+            "compile_id": compile_id,
+            "backtest_id": backtest_id,
+            "backtest_name": backtest_name,
+            "status": "Running",
+            "message": f"Backtest started. Use read_backtest to check results.",
+        })
 
     except Exception as e:
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}",
-            }
-        )
+        return json.dumps({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+        })
 
 
 @tool
@@ -536,16 +458,14 @@ async def edit_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]"
     """
     try:
-        qc_project_id = await get_qc_project_id_from_thread(config)
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
             return json.dumps({"success": False, "error": "No project context."})
 
         if not edits:
-            return json.dumps(
-                {"success": False, "error": "At least one edit required."}
-            )
+            return json.dumps({"success": False, "error": "At least one edit required."})
 
         # Step 1: Read current file
         try:
@@ -555,25 +475,17 @@ async def edit_and_run_backtest(
             )
             files = files_data.get("files", [])
             if not files:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": f"File '{file_name}' not found",
-                    }
-                )
-            current_content = (
-                files[0].get("content", "")
-                if isinstance(files, list)
-                else files_data.get("content", "")
-            )
-        except Exception as e:
-            return json.dumps(
-                {
+                return json.dumps({
                     "success": False,
-                    "step": "file_read",
-                    "error": f"Failed to read {file_name}: {str(e)}",
-                }
-            )
+                    "error": f"File '{file_name}' not found",
+                })
+            current_content = files[0].get("content", "") if isinstance(files, list) else files_data.get("content", "")
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "step": "file_read",
+                "error": f"Failed to read {file_name}: {str(e)}",
+            })
 
         # Step 2: Apply edits
         updated_content = current_content
@@ -582,35 +494,29 @@ async def edit_and_run_backtest(
             new_content = edit.get("new_content", "")
 
             if not old_content:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "edit_index": i + 1,
-                        "error": f"Edit {i + 1}: old_content is required",
-                    }
-                )
+                return json.dumps({
+                    "success": False,
+                    "edit_index": i + 1,
+                    "error": f"Edit {i + 1}: old_content is required",
+                })
 
             occurrences = updated_content.count(old_content)
             if occurrences == 0:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "step": "search_replace",
-                        "edit_index": i + 1,
-                        "error": f"Edit {i + 1}: old_content not found in file",
-                        "hint": "Use read_file to get current content and copy exact text.",
-                    }
-                )
+                return json.dumps({
+                    "success": False,
+                    "step": "search_replace",
+                    "edit_index": i + 1,
+                    "error": f"Edit {i + 1}: old_content not found in file",
+                    "hint": "Use read_file to get current content and copy exact text.",
+                })
 
             if occurrences > 1:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "step": "search_replace",
-                        "edit_index": i + 1,
-                        "error": f"Edit {i + 1}: old_content appears {occurrences} times. Must be unique.",
-                    }
-                )
+                return json.dumps({
+                    "success": False,
+                    "step": "search_replace",
+                    "edit_index": i + 1,
+                    "error": f"Edit {i + 1}: old_content appears {occurrences} times. Must be unique.",
+                })
 
             updated_content = updated_content.replace(old_content, new_content)
 
@@ -625,13 +531,11 @@ async def edit_and_run_backtest(
                 },
             )
         except Exception as e:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "file_update",
-                    "error": f"Failed to update {file_name}: {str(e)}",
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "file_update",
+                "error": f"Failed to update {file_name}: {str(e)}",
+            })
 
         # Step 4: Compile
         try:
@@ -640,28 +544,24 @@ async def edit_and_run_backtest(
             )
             compile_id = compile_data.get("compileId")
         except Exception as e:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "compile_create",
-                    "error": str(e),
-                    "file_updated": file_name,
-                    "edits_applied": len(edits),
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "compile_create",
+                "error": str(e),
+                "file_updated": file_name,
+                "edits_applied": len(edits),
+            })
 
         # Step 5: Poll compile
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
 
         if not is_compiled:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "compilation",
-                    "compile_id": compile_id,
-                    "error": f"Compilation failed: {compile_error}",
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "compilation",
+                "compile_id": compile_id,
+                "error": f"Compilation failed: {compile_error}",
+            })
 
         # Step 6: Create backtest
         try:
@@ -679,68 +579,55 @@ async def edit_and_run_backtest(
                 backtest = backtest[0] if backtest else {}
             backtest_id = backtest.get("backtestId")
         except Exception as e:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "backtest_create",
-                    "error": str(e),
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "backtest_create",
+                "error": str(e),
+            })
 
         # Step 7: Poll backtest
-        backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id
-        )
+        backtest_result, backtest_error = await _poll_backtest(qc_project_id, backtest_id)
 
         if backtest_error:
-            return json.dumps(
-                {
-                    "success": False,
-                    "step": "backtest_execution",
-                    "backtest_id": backtest_id,
-                    "error": backtest_error,
-                }
-            )
+            return json.dumps({
+                "success": False,
+                "step": "backtest_execution",
+                "backtest_id": backtest_id,
+                "error": backtest_error,
+            })
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
-            return json.dumps(
-                {
-                    "success": True,
-                    "file_updated": file_name,
-                    "edits_applied": len(edits),
-                    "compile_id": compile_id,
-                    "backtest_id": backtest_id,
-                    "backtest_name": backtest_name,
-                    "completed": True,
-                    "statistics": {
-                        "net_profit": stats.get("Net Profit", "N/A"),
-                        "cagr": stats.get("Compounding Annual Return", "N/A"),
-                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                        "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "win_rate": stats.get("Win Rate", "N/A"),
-                        "total_trades": stats.get("Total Trades", "N/A"),
-                    },
-                    "message": f"Applied {len(edits)} edit(s), compiled, backtest completed!",
-                },
-                indent=2,
-            )
-
-        return json.dumps(
-            {
+            return json.dumps({
                 "success": True,
                 "file_updated": file_name,
                 "edits_applied": len(edits),
+                "compile_id": compile_id,
                 "backtest_id": backtest_id,
-                "status": "Running",
-                "message": "Backtest started. Use read_backtest to check results.",
-            }
-        )
+                "backtest_name": backtest_name,
+                "completed": True,
+                "statistics": {
+                    "net_profit": stats.get("Net Profit", "N/A"),
+                    "cagr": stats.get("Compounding Annual Return", "N/A"),
+                    "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
+                    "max_drawdown": stats.get("Drawdown", "N/A"),
+                    "win_rate": stats.get("Win Rate", "N/A"),
+                    "total_trades": stats.get("Total Trades", "N/A"),
+                },
+                "message": f"Applied {len(edits)} edit(s), compiled, backtest completed!",
+            }, indent=2)
+
+        return json.dumps({
+            "success": True,
+            "file_updated": file_name,
+            "edits_applied": len(edits),
+            "backtest_id": backtest_id,
+            "status": "Running",
+            "message": "Backtest started. Use read_backtest to check results.",
+        })
 
     except Exception as e:
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}",
-            }
-        )
+        return json.dumps({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+        })
