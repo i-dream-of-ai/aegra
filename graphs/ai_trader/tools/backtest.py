@@ -12,8 +12,19 @@ from qc_api import qc_request
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
     """Extract qc_project_id from RunnableConfig."""
+    # DEBUG: Log config type and contents
+    import structlog
+    logger = structlog.getLogger(__name__)
+    logger.info(f"[DEBUG] config type: {type(config)}, config: {config}")
+
+    if isinstance(config, str):
+        logger.error(f"[DEBUG] config is a string! value: {config[:200]}")
+        return None
+
     configurable = config.get("configurable", {})
+    logger.info(f"[DEBUG] configurable: {configurable}")
     project_id = configurable.get("qc_project_id")
+    logger.info(f"[DEBUG] qc_project_id from config: {project_id}")
     if project_id is not None:
         return int(project_id)
     env_id = os.environ.get("QC_PROJECT_ID")
