@@ -585,7 +585,12 @@ def load_dynamic_model(model_name: str | None, thinking_budget: int | None = Non
     supports_thinking = any(
         x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]
     )
-    if provider == "anthropic" and thinking_budget and thinking_budget > 0 and supports_thinking:
+    if (
+        provider == "anthropic"
+        and thinking_budget
+        and thinking_budget > 0
+        and supports_thinking
+    ):
         model_kwargs["thinking"] = {
             "type": "enabled",
             "budget_tokens": thinking_budget,
