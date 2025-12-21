@@ -10,29 +10,26 @@ from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
 
 
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {}) if config else {}
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
+from thread_context import get_qc_project_id_from_thread, get_thread_metadata
 
 
-def no_project_error(config: RunnableConfig) -> str:
+async def no_project_error(config: RunnableConfig) -> str:
     """Return a JSON error with debug info when project context is missing."""
     configurable = config.get("configurable", {}) if config else {}
+    thread_id = configurable.get("thread_id")
+    thread_metadata = None
+    if thread_id:
+        thread_metadata = await get_thread_metadata(thread_id)
+
     debug_info = {
         "config_keys": list(config.keys()) if config else [],
         "configurable_keys": list(configurable.keys()),
-        "qc_project_id": configurable.get("qc_project_id"),
-        "project_db_id": configurable.get("project_db_id"),
-        "thread_id": configurable.get("thread_id"),
+        "thread_id": thread_id,
+        "thread_metadata": thread_metadata,
     }
     return json.dumps({
         "error": True,
-        "message": "No project context.",
+        "message": "No project context in thread metadata.",
         "debug": debug_info,
     })
 
@@ -107,11 +104,11 @@ async def compile_and_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         # Step 1: Compile
         try:
@@ -201,11 +198,11 @@ async def compile_and_optimize(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         if not parameters or len(parameters) == 0:
             return json.dumps(
@@ -348,7 +345,7 @@ async def update_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -539,7 +536,7 @@ async def edit_and_run_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]"
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:

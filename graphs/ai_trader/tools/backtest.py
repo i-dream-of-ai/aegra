@@ -10,30 +10,29 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
 
-
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {}) if config else {}
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
+from thread_context import get_qc_project_id_from_thread
 
 
-def no_project_error(config: RunnableConfig) -> str:
+async def no_project_error(config: RunnableConfig) -> str:
     """Return a JSON error with debug info when project context is missing."""
     configurable = config.get("configurable", {}) if config else {}
+
+    # Try to get thread metadata for debugging
+    thread_id = configurable.get("thread_id")
+    thread_metadata = None
+    if thread_id:
+        from thread_context import get_thread_metadata
+        thread_metadata = await get_thread_metadata(thread_id)
+
     debug_info = {
         "config_keys": list(config.keys()) if config else [],
         "configurable_keys": list(configurable.keys()),
-        "qc_project_id": configurable.get("qc_project_id"),
-        "project_db_id": configurable.get("project_db_id"),
-        "thread_id": configurable.get("thread_id"),
+        "thread_id": thread_id,
+        "thread_metadata": thread_metadata,
     }
     return json.dumps({
         "error": True,
-        "message": "No project context.",
+        "message": "No project context in thread metadata.",
         "debug": debug_info,
     })
 
@@ -52,11 +51,11 @@ async def create_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         result = await qc_request(
             "/backtests/create",
@@ -124,9 +123,9 @@ async def read_backtest(
         backtest_id: The backtest ID to read
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         result = await qc_request(
             "/backtests/read",
@@ -185,9 +184,9 @@ async def read_backtest_chart(
         sample_count: Number of data points (default: 100, max: 200)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         effective_count = min(sample_count, 200)
 
@@ -253,9 +252,9 @@ async def read_backtest_orders(
         page_size: Orders per page (default: 50, max: 100)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         start = (page - 1) * page_size
         end = start + page_size
@@ -311,9 +310,9 @@ async def read_backtest_insights(
         end: End index (default: 100)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         data = await qc_request(
             "/backtests/insights/read",
@@ -347,9 +346,9 @@ async def list_backtests(
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         result = await qc_request(
             "/backtests/list",
@@ -416,9 +415,9 @@ async def update_backtest(
         note: Note/description (optional)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         payload = {
             "projectId": qc_project_id,
@@ -463,9 +462,9 @@ async def delete_backtest(
         backtest_id: The backtest ID to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
-            return no_project_error(config)
+            return await no_project_error(config)
 
         await qc_request(
             "/backtests/delete",
