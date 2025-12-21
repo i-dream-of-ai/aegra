@@ -2,22 +2,12 @@
 
 import asyncio
 import json
-import os
 from typing import Annotated
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
-
-
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
+from thread_context import get_qc_project_id_from_thread
 
 
 @tool
@@ -29,7 +19,7 @@ async def create_compile(
     Returns the compile ID needed for backtests and optimizations.
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -99,7 +89,7 @@ async def read_compile(
         compile_id: The compile ID to check
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 

@@ -29,14 +29,33 @@ def get_user_token(config: RunnableConfig) -> str | None:
     return auth_user.get("access_token")
 
 
+# Re-export async functions from thread_context for backward compatibility
+# These are async and fetch from thread metadata in the database
+from thread_context import get_project_db_id_from_thread as get_project_db_id_async
+from thread_context import get_qc_project_id_from_thread as get_qc_project_id_async
+
+
 def get_project_db_id(config: RunnableConfig) -> str | None:
-    """Extract project_db_id from config."""
+    """DEPRECATED: Use get_project_db_id_async instead.
+
+    This sync version only checks config.configurable and env vars,
+    it cannot fetch from thread metadata.
+    """
+    if config is None or not isinstance(config, dict):
+        return os.environ.get("PROJECT_DB_ID")
     configurable = config.get("configurable", {})
     return configurable.get("project_db_id") or os.environ.get("PROJECT_DB_ID")
 
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
+    """DEPRECATED: Use get_qc_project_id_async instead.
+
+    This sync version only checks config.configurable and env vars,
+    it cannot fetch from thread metadata.
+    """
+    if config is None or not isinstance(config, dict):
+        env_id = os.environ.get("QC_PROJECT_ID")
+        return int(env_id) if env_id else None
     configurable = config.get("configurable", {})
     project_id = configurable.get("qc_project_id")
     if project_id is not None:

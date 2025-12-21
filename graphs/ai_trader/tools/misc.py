@@ -7,7 +7,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.types import interrupt
 from qc_api import qc_request
-from supabase_client import SupabaseClient, get_project_db_id, get_qc_project_id
+from supabase_client import SupabaseClient
+from thread_context import get_project_db_id_from_thread, get_qc_project_id_from_thread
 
 
 @tool
@@ -53,7 +54,7 @@ async def get_code_versions(
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        project_db_id = get_project_db_id(config)
+        project_db_id = await get_project_db_id_from_thread(config)
         if not project_db_id:
             return json.dumps(
                 {
@@ -200,7 +201,7 @@ async def read_project_nodes(
     Read available and active nodes for the current QuantConnect project.
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -229,7 +230,7 @@ async def update_project_nodes(
         nodes: List of node identifiers (e.g., ["L1-1", "L1-2"])
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -263,7 +264,7 @@ async def read_lean_versions(
     Get available LEAN versions on QuantConnect.
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 

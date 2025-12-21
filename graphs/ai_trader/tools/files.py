@@ -1,23 +1,12 @@
 """File tools for QuantConnect projects."""
 
 import json
-import os
 from typing import Annotated
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
-
-
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    # Fallback to env var for local development
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
+from thread_context import get_qc_project_id_from_thread
 
 
 @tool
@@ -34,7 +23,7 @@ async def create_file(
         content: Full content of the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -74,7 +63,7 @@ async def read_file(
         file_name: Name of the file to read, or "*" for all files
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -142,7 +131,7 @@ async def update_file(
         content: New full content for the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -183,7 +172,7 @@ async def rename_file(
         new_file_name: New name for the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -232,7 +221,7 @@ async def delete_file(
         file_name: Name of the file to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = await get_qc_project_id_from_thread(config)
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
