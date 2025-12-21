@@ -13,7 +13,13 @@ from qc_api import qc_request
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
     """Extract qc_project_id from RunnableConfig."""
+    import structlog
+    logger = structlog.get_logger()
+
     configurable = config.get("configurable", {})
+    logger.info(f"[TOOL DEBUG] config keys: {list(config.keys()) if config else 'None'}")
+    logger.info(f"[TOOL DEBUG] configurable: {configurable}")
+
     project_id = configurable.get("qc_project_id")
     if project_id is not None:
         return int(project_id)
