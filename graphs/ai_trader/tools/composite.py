@@ -12,12 +12,29 @@ from qc_api import qc_request
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
     """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
+    configurable = config.get("configurable", {}) if config else {}
     project_id = configurable.get("qc_project_id")
     if project_id is not None:
         return int(project_id)
     env_id = os.environ.get("QC_PROJECT_ID")
     return int(env_id) if env_id else None
+
+
+def no_project_error(config: RunnableConfig) -> str:
+    """Return a JSON error with debug info when project context is missing."""
+    configurable = config.get("configurable", {}) if config else {}
+    debug_info = {
+        "config_keys": list(config.keys()) if config else [],
+        "configurable_keys": list(configurable.keys()),
+        "qc_project_id": configurable.get("qc_project_id"),
+        "project_db_id": configurable.get("project_db_id"),
+        "thread_id": configurable.get("thread_id"),
+    }
+    return json.dumps({
+        "error": True,
+        "message": "No project context.",
+        "debug": debug_info,
+    })
 
 
 async def _poll_compile(
@@ -94,7 +111,7 @@ async def compile_and_backtest(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         # Step 1: Compile
         try:
@@ -188,7 +205,7 @@ async def compile_and_optimize(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         if not parameters or len(parameters) == 0:
             return json.dumps(

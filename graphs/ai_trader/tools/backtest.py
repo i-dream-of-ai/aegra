@@ -13,18 +13,29 @@ from qc_api import qc_request
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
     """Extract qc_project_id from RunnableConfig."""
-    import structlog
-    logger = structlog.get_logger()
-
-    configurable = config.get("configurable", {})
-    logger.info(f"[TOOL DEBUG] config keys: {list(config.keys()) if config else 'None'}")
-    logger.info(f"[TOOL DEBUG] configurable: {configurable}")
-
+    configurable = config.get("configurable", {}) if config else {}
     project_id = configurable.get("qc_project_id")
     if project_id is not None:
         return int(project_id)
     env_id = os.environ.get("QC_PROJECT_ID")
     return int(env_id) if env_id else None
+
+
+def no_project_error(config: RunnableConfig) -> str:
+    """Return a JSON error with debug info when project context is missing."""
+    configurable = config.get("configurable", {}) if config else {}
+    debug_info = {
+        "config_keys": list(config.keys()) if config else [],
+        "configurable_keys": list(configurable.keys()),
+        "qc_project_id": configurable.get("qc_project_id"),
+        "project_db_id": configurable.get("project_db_id"),
+        "thread_id": configurable.get("thread_id"),
+    }
+    return json.dumps({
+        "error": True,
+        "message": "No project context.",
+        "debug": debug_info,
+    })
 
 
 @tool
@@ -45,7 +56,7 @@ async def create_backtest(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         result = await qc_request(
             "/backtests/create",
@@ -115,7 +126,7 @@ async def read_backtest(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         result = await qc_request(
             "/backtests/read",
@@ -176,7 +187,7 @@ async def read_backtest_chart(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         effective_count = min(sample_count, 200)
 
@@ -244,7 +255,7 @@ async def read_backtest_orders(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         start = (page - 1) * page_size
         end = start + page_size
@@ -302,7 +313,7 @@ async def read_backtest_insights(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         data = await qc_request(
             "/backtests/insights/read",
@@ -338,7 +349,7 @@ async def list_backtests(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         result = await qc_request(
             "/backtests/list",
@@ -407,7 +418,7 @@ async def update_backtest(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         payload = {
             "projectId": qc_project_id,
@@ -454,7 +465,7 @@ async def delete_backtest(
     try:
         qc_project_id = get_qc_project_id(config)
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return no_project_error(config)
 
         await qc_request(
             "/backtests/delete",
