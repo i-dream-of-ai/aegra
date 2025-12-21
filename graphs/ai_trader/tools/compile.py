@@ -1,34 +1,23 @@
 """Compile tools for QuantConnect."""
 
-import os
-import json
 import asyncio
-from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
-from langchain_core.runnables import RunnableConfig
-from qc_api import qc_request
+import json
+
+from langgraph.runtime import get_runtime
+
+from ai_trader.context import Context
+from ai_trader.qc_api import qc_request
 
 
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
-
-
-@tool
-async def create_compile(
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def create_compile() -> str:
     """
     Compile the current project on QuantConnect.
     Returns the compile ID needed for backtests and optimizations.
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -53,38 +42,40 @@ async def create_compile(
             state = status.get("state", "Unknown")
 
         if state == "BuildSuccess":
-            return json.dumps({
-                "success": True,
-                "compile_id": compile_id,
-                "state": state,
-                "message": "Compilation successful. Ready for backtest or optimization.",
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "message": "Compilation successful. Ready for backtest or optimization.",
+                }
+            )
         elif state == "BuildError":
             logs = result.get("logs", [])
-            return json.dumps({
-                "error": True,
-                "compile_id": compile_id,
-                "state": state,
-                "logs": logs[:20] if logs else [],
-                "message": "Compilation failed.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "logs": logs[:20] if logs else [],
+                    "message": "Compilation failed.",
+                }
+            )
         else:
-            return json.dumps({
-                "success": True,
-                "compile_id": compile_id,
-                "state": state,
-                "message": f"Compile created with state: {state}",
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "compile_id": compile_id,
+                    "state": state,
+                    "message": f"Compile created with state: {state}",
+                }
+            )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to compile: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to compile: {e!s}"})
 
 
-@tool
-async def read_compile(
-    compile_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def read_compile(compile_id: str) -> str:
     """
     Read compile status and logs.
 
@@ -92,7 +83,9 @@ async def read_compile(
         compile_id: The compile ID to check
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -104,11 +97,18 @@ async def read_compile(
         state = result.get("state", "Unknown")
         logs = result.get("logs", [])
 
-        return json.dumps({
-            "compile_id": compile_id,
-            "state": state,
-            "logs": logs[:20] if logs else [],
-        }, indent=2)
+        return json.dumps(
+            {
+                "compile_id": compile_id,
+                "state": state,
+                "logs": logs[:20] if logs else [],
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read compile: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to read compile: {e!s}"})
+
+
+# Export all tools
+TOOLS = [create_compile, read_compile]

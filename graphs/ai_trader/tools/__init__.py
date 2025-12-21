@@ -14,6 +14,14 @@ if str(_parent_dir) not in sys.path:
     sys.path.insert(0, str(_parent_dir))
 
 # Files
+from .files import (
+    create_file,
+    delete_file,
+    read_file,
+    rename_file,
+    update_file,
+)
+
 # AI Services
 from .ai_services import (
     check_initialization_errors,
@@ -48,13 +56,6 @@ from .composite import (
     edit_and_run_backtest,
     update_and_run_backtest,
 )
-from .files import (
-    create_file,
-    delete_file,
-    read_file,
-    rename_file,
-    update_file,
-)
 
 # Misc
 from .misc import (
@@ -84,6 +85,9 @@ from .optimization import (
     read_optimization,
     update_optimization,
 )
+
+# Review (Doubtful Deacon)
+from .review import request_code_review
 
 __all__ = [
     # Files (5)
@@ -138,4 +142,6 @@ __all__ = [
     "read_project_nodes",
     "update_project_nodes",
     "read_lean_versions",
+    # Review (1)
+    "request_code_review",
 ]

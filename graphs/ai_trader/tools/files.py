@@ -1,30 +1,14 @@
 """File tools for QuantConnect projects."""
 
-import os
 import json
-from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
-from langchain_core.runnables import RunnableConfig
-from qc_api import qc_request
+
+from langgraph.runtime import get_runtime
+
+from ai_trader.context import Context
+from ai_trader.qc_api import qc_request
 
 
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    # Fallback to env var for local development
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
-
-
-@tool
-async def create_file(
-    file_name: str,
-    content: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def create_file(file_name: str, content: str) -> str:
     """
     Create a new file in the QuantConnect project.
 
@@ -33,7 +17,9 @@ async def create_file(
         content: Full content of the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -46,21 +32,19 @@ async def create_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' created successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' created successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create file: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to create file: {e!s}"})
 
 
-@tool
-async def read_file(
-    file_name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def read_file(file_name: str) -> str:
     """
     Read a file from the QuantConnect project.
     Use "*" to read all files.
@@ -69,7 +53,9 @@ async def read_file(
         file_name: Name of the file to read, or "*" for all files
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -80,45 +66,50 @@ async def read_file(
 
         files = result.get("files", [])
         if not files:
-            return json.dumps({
-                "error": True,
-                "message": f"File '{file_name}' not found.",
-                "hint": 'Use read_file with "*" to list all files.',
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"File '{file_name}' not found.",
+                    "hint": 'Use read_file with "*" to list all files.',
+                }
+            )
 
         # Handle multiple files (when file_name is "*")
         if file_name == "*" and isinstance(files, list):
             file_list = []
             for f in files:
-                file_list.append({
-                    "name": f.get("name"),
-                    "content": f.get("content"),
-                })
-            return json.dumps({
-                "success": True,
-                "files": file_list,
-            }, indent=2)
+                file_list.append(
+                    {
+                        "name": f.get("name"),
+                        "content": f.get("content"),
+                    }
+                )
+            return json.dumps(
+                {
+                    "success": True,
+                    "files": file_list,
+                },
+                indent=2,
+            )
 
         # Single file
         file_data = files[0] if isinstance(files, list) else files
         content = file_data.get("content", "")
 
-        return json.dumps({
-            "success": True,
-            "file_name": file_name,
-            "content": content,
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "file_name": file_name,
+                "content": content,
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read file: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to read file: {e!s}"})
 
 
-@tool
-async def update_file(
-    file_name: str,
-    content: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def update_file(file_name: str, content: str) -> str:
     """
     Update an existing file in the QuantConnect project.
 
@@ -127,7 +118,9 @@ async def update_file(
         content: New full content for the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -140,22 +133,19 @@ async def update_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' updated successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' updated successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update file: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to update file: {e!s}"})
 
 
-@tool
-async def rename_file(
-    old_file_name: str,
-    new_file_name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def rename_file(old_file_name: str, new_file_name: str) -> str:
     """
     Rename a file in the QuantConnect project.
 
@@ -164,12 +154,16 @@ async def rename_file(
         new_file_name: New name for the file
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
         if not old_file_name or not new_file_name:
-            return json.dumps({"error": True, "message": "Both old and new file names are required."})
+            return json.dumps(
+                {"error": True, "message": "Both old and new file names are required."}
+            )
 
         await qc_request(
             "/files/update",
@@ -180,26 +174,26 @@ async def rename_file(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Renamed '{old_file_name}' to '{new_file_name}'.",
-            "old_name": old_file_name,
-            "new_name": new_file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Renamed '{old_file_name}' to '{new_file_name}'.",
+                "old_name": old_file_name,
+                "new_name": new_file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to rename file: {str(e)}",
-            "hint": 'Use read_file with "*" to list all files.',
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to rename file: {e!s}",
+                "hint": 'Use read_file with "*" to list all files.',
+            }
+        )
 
 
-@tool
-async def delete_file(
-    file_name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def delete_file(file_name: str) -> str:
     """
     Delete a file from the QuantConnect project.
 
@@ -207,7 +201,9 @@ async def delete_file(
         file_name: Name of the file to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -216,11 +212,17 @@ async def delete_file(
             {"projectId": qc_project_id, "name": file_name},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"File '{file_name}' deleted successfully.",
-            "file_name": file_name,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"File '{file_name}' deleted successfully.",
+                "file_name": file_name,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete file: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to delete file: {e!s}"})
+
+
+# Export all tools
+TOOLS = [create_file, read_file, update_file, rename_file, delete_file]
