@@ -17,7 +17,7 @@ Architecture:
 """
 
 from .middleware import SubconsciousMiddleware, create_subconscious_middleware
-from .types import SubconsciousState, InjectionResult, SubconsciousEvent
+from .types import InjectionResult, SubconsciousEvent, SubconsciousState
 
 __all__ = [
     "SubconsciousMiddleware",

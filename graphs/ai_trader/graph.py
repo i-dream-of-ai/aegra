@@ -15,25 +15,26 @@ Features:
 - Message sanitization (empty messages, thinking blocks)
 """
 
-import os
 import json
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Annotated, Any
+
 import httpx
 import structlog
-from dataclasses import dataclass
-from typing import Annotated, Any, Callable
-from typing_extensions import TypedDict
-
-from langgraph.graph.message import add_messages
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage
 from langchain.agents import create_agent as langchain_create_agent
 from langchain.agents.middleware import (
-    SummarizationMiddleware,
     HumanInTheLoopMiddleware,
-    wrap_model_call,
     ModelRequest,
     ModelResponse,
+    SummarizationMiddleware,
+    wrap_model_call,
 )
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
 
 logger = structlog.getLogger(__name__)
 
@@ -74,73 +75,72 @@ if str(_graph_dir) not in sys.path:
 # Subconscious middleware for dynamic context injection
 from subconscious import create_subconscious_middleware
 
-# Files (5 tools)
-from tools.files import create_file, read_file, update_file, rename_file, delete_file
-
-# Compile (2 tools)
-from tools.compile import create_compile, read_compile
+# AI Services (8 tools)
+from tools.ai_services import (
+    check_initialization_errors,
+    check_syntax,
+    complete_code,
+    enhance_error_message,
+    get_algorithm_code,
+    search_local_algorithms,
+    search_quantconnect,
+    update_code_to_pep8,
+)
 
 # Backtest (8 tools)
 from tools.backtest import (
     create_backtest,
+    delete_backtest,
+    list_backtests,
     read_backtest,
     read_backtest_chart,
-    read_backtest_orders,
     read_backtest_insights,
-    list_backtests,
+    read_backtest_orders,
     update_backtest,
-    delete_backtest,
 )
 
-# Optimization (7 tools)
-from tools.optimization import (
-    estimate_optimization,
-    create_optimization,
-    read_optimization,
-    list_optimizations,
-    update_optimization,
-    abort_optimization,
-    delete_optimization,
-)
-
-# Object Store (4 tools)
-from tools.object_store import (
-    upload_object,
-    read_object_properties,
-    list_object_store_files,
-    delete_object,
-)
+# Compile (2 tools)
+from tools.compile import create_compile, read_compile
 
 # Composite (4 tools)
 from tools.composite import (
     compile_and_backtest,
     compile_and_optimize,
-    update_and_run_backtest,
     edit_and_run_backtest,
+    update_and_run_backtest,
 )
 
-# AI Services (8 tools)
-from tools.ai_services import (
-    check_initialization_errors,
-    complete_code,
-    enhance_error_message,
-    check_syntax,
-    update_code_to_pep8,
-    search_quantconnect,
-    search_local_algorithms,
-    get_algorithm_code,
-)
+# Files (5 tools)
+from tools.files import create_file, delete_file, read_file, rename_file, update_file
 
 # Misc (6 tools)
 from tools.misc import (
-    wait,
-    get_code_versions,
     get_code_version,
+    get_code_versions,
+    read_lean_versions,
     read_project_nodes,
     update_project_nodes,
-    read_lean_versions,
+    wait,
 )
 
+# Object Store (4 tools)
+from tools.object_store import (
+    delete_object,
+    list_object_store_files,
+    read_object_properties,
+    upload_object,
+)
+
+# Optimization (7 tools)
+from tools.optimization import (
+    abort_optimization,
+    create_optimization,
+    delete_optimization,
+    estimate_optimization,
+    list_optimizations,
+    read_optimization,
+    update_optimization,
+)
 
 # =============================================================================
 # DEFAULT SYSTEM PROMPTS
@@ -582,15 +582,15 @@ def load_dynamic_model(model_name: str | None, thinking_budget: int | None = Non
     model_kwargs: dict[str, Any] = {}
 
     # Add thinking budget for Claude models that support it
-    if provider == "anthropic" and thinking_budget and thinking_budget > 0:
-        if any(
-            x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]
-        ):
-            model_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget,
-            }
-            logger.info(f"[graph] Enabled thinking with budget {thinking_budget}")
+    supports_thinking = any(
+        x in model_name for x in ["claude-3-5", "claude-4", "sonnet-4", "opus-4"]
+    )
+    if provider == "anthropic" and thinking_budget and thinking_budget > 0 and supports_thinking:
+        model_kwargs["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": thinking_budget,
+        }
+        logger.info(f"[graph] Enabled thinking with budget {thinking_budget}")
 
     logger.info(f"[graph] Loading model: {model_name} (provider: {provider})")
     return init_chat_model(model_name, model_provider=provider, **model_kwargs)

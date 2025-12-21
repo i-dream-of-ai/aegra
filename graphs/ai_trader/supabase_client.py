@@ -7,8 +7,9 @@ Provides authenticated access to Supabase using either:
 """
 
 import os
-import httpx
 from typing import Any
+
+import httpx
 from langchain_core.runnables import RunnableConfig
 
 

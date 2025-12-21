@@ -1,11 +1,12 @@
 """Composite tools that combine multiple operations."""
 
-import os
-import json
 import asyncio
+import json
+import os
 from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
+
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from qc_api import qc_request
 
 
@@ -489,7 +490,7 @@ async def update_and_run_backtest(
                 "backtest_id": backtest_id,
                 "backtest_name": backtest_name,
                 "status": "Running",
-                "message": f"Backtest started. Use read_backtest to check results.",
+                "message": "Backtest started. Use read_backtest to check results.",
             }
         )
 

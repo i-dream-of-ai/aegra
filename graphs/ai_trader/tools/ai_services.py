@@ -1,11 +1,12 @@
 """AI service tools for search and code assistance."""
 
+import json
 import os
 import re
-import json
 from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
+
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from openai import AsyncOpenAI
 from qc_api import qc_request
 from supabase_client import SupabaseClient, get_qc_project_id

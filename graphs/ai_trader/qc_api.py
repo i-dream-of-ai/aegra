@@ -4,11 +4,12 @@ QuantConnect API Client
 SHA256 timestamped authentication matching the TypeScript implementation.
 """
 
-import hashlib
 import base64
-import time
+import hashlib
 import os
+import time
 from typing import Any
+
 import httpx
 
 QC_API_URL = "https://www.quantconnect.com/api/v2"

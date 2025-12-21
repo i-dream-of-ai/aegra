@@ -96,6 +96,11 @@ ignore = [
 "alembic/**/*.py" = [
     "ERA",   # commented code in migrations is intentional
 ]
+"graphs/**/*.py" = [
+    "E402",  # module level import not at top (path setup needed first)
+    "ERA001", # organizational comments in tool lists are intentional
+    "ARG001", # injected arguments (InjectedToolArg) appear unused but are used by LangChain
+]
 
 [tool.ruff.format]
 quote-style = "double"
