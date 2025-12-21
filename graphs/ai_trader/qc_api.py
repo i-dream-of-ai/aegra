@@ -57,6 +57,10 @@ async def qc_request(
         response.raise_for_status()
         data = response.json()
 
+        # Handle case where API returns a string instead of dict
+        if isinstance(data, str):
+            raise Exception(f"QC API returned unexpected string: {data}")
+
         # Handle QC API success: false pattern
         if isinstance(data, dict) and data.get("success") is False:
             errors = data.get("errors", [])
