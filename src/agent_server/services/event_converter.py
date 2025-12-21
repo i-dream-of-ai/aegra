@@ -157,9 +157,15 @@ class EventConverter:
             # Pass the payload to end event - may contain error info
             if isinstance(payload, dict) and payload.get("status") == "error":
                 # Error end event - include error message
+                error_msg = payload.get("error", "Unknown error")
+                # Log for debugging
+                import structlog
+                structlog.getLogger(__name__).info(
+                    f"[event_converter] Converting error end event: {error_msg[:200]}"
+                )
                 return format_sse_message(
                     "end",
-                    {"status": "error", "error": payload.get("error", "Unknown error")},
+                    {"status": "error", "error": error_msg},
                     event_id,
                 )
             return create_end_event(event_id)
