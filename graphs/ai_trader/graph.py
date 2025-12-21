@@ -17,6 +17,7 @@ from typing import Literal
 import structlog
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
@@ -57,47 +58,103 @@ async def fetch_agent_config(state: State, *, runtime: Runtime[Context]) -> dict
     """
     Fetch agent configuration from the database and update runtime context.
 
-    This runs at the start of each conversation to load custom prompts,
-    model settings, and feature flags from the agent_configs table.
+    This runs at the start of each run to load the project's AI settings
+    from the projects table, including model, thinking_budget, and agent_config JSONB.
     """
     ctx = runtime.context
 
-    # Only fetch if we have a user_id
-    if not ctx.user_id:
-        logger.info("No user_id in context, using default config")
+    # Must have project_db_id to fetch config
+    if not ctx.project_db_id:
+        logger.info("No project_db_id in context, using default config")
         return {}
 
     try:
         client = SupabaseClient(use_service_role=True)
 
-        # Fetch agent config for this user
-        configs = await client.select(
-            "agent_configs",
+        # Fetch project with its agent_config and AI settings
+        projects = await client.select(
+            "projects",
             {
-                "select": "*",
-                "user_id": f"eq.{ctx.user_id}",
-                "is_active": "eq.true",
+                "select": "id,ai_model,thinking_budget,reasoning_effort,text_verbosity,max_output_tokens,agent_config",
+                "id": f"eq.{ctx.project_db_id}",
                 "limit": "1",
             },
         )
 
-        if configs:
-            config = configs[0]
-            logger.info(
-                "Loaded agent config",
-                config_id=config.get("id"),
-                user_id=ctx.user_id,
-            )
+        if not projects:
+            logger.warning("Project not found", project_db_id=ctx.project_db_id)
+            return {}
 
-            # Emit event for the frontend
-            dispatch_custom_event(
-                "agent_config_loaded",
-                {
-                    "config_id": config.get("id"),
-                    "model": config.get("model"),
-                    "has_custom_prompt": bool(config.get("system_prompt")),
-                },
-            )
+        project = projects[0]
+        agent_config = project.get("agent_config") or {}
+
+        # Get main agent (Shooby Dooby) settings from JSONB
+        main_config = agent_config.get("main", {})
+
+        # Apply main agent settings to context (JSONB overrides project-level settings)
+        if main_config.get("model"):
+            ctx.model = main_config["model"]
+        elif project.get("ai_model"):
+            ctx.model = project["ai_model"]
+
+        if main_config.get("thinkingBudget") is not None:
+            ctx.thinking_budget = main_config["thinkingBudget"]
+        elif project.get("thinking_budget") is not None:
+            ctx.thinking_budget = project["thinking_budget"]
+
+        if main_config.get("verbosity"):
+            ctx.verbosity = main_config["verbosity"]
+        elif project.get("text_verbosity"):
+            ctx.verbosity = project["text_verbosity"]
+
+        # Reasoning effort for GPT models
+        if main_config.get("reasoningEffort"):
+            ctx.reasoning_effort = main_config["reasoningEffort"]
+        elif project.get("reasoning_effort"):
+            ctx.reasoning_effort = project["reasoning_effort"]
+
+        # Custom system prompt override
+        if main_config.get("systemPrompt"):
+            ctx.system_prompt = main_config["systemPrompt"]
+
+        # Subconscious toggle (default true, can be disabled in UI)
+        if main_config.get("subconsciousEnabled") is False:
+            ctx.subconscious_enabled = False
+
+        # Get reviewer agent (Doubtful Deacon) settings
+        reviewer_config = agent_config.get("reviewer", {})
+
+        if reviewer_config.get("model"):
+            ctx.reviewer_model = reviewer_config["model"]
+
+        if reviewer_config.get("thinkingBudget") is not None:
+            ctx.reviewer_thinking_budget = reviewer_config["thinkingBudget"]
+
+        if reviewer_config.get("reasoningEffort"):
+            ctx.reviewer_reasoning_effort = reviewer_config["reasoningEffort"]
+
+        if reviewer_config.get("systemPrompt"):
+            ctx.reviewer_prompt = reviewer_config["systemPrompt"]
+
+        logger.info(
+            "Loaded project config",
+            project_id=ctx.project_db_id,
+            model=ctx.model,
+            thinking_budget=ctx.thinking_budget,
+            reviewer_model=ctx.reviewer_model,
+        )
+
+        # Emit event for the frontend
+        dispatch_custom_event(
+            "agent_config_loaded",
+            {
+                "project_id": ctx.project_db_id,
+                "model": ctx.model,
+                "thinking_budget": ctx.thinking_budget,
+                "verbosity": ctx.verbosity,
+                "reviewer_model": ctx.reviewer_model,
+            },
+        )
 
     except Exception as e:
         logger.warning("Failed to fetch agent config", error=str(e))
@@ -170,25 +227,41 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
             f"\n\n<injected_context>\n{state.subconscious_context}\n</injected_context>"
         )
 
-    # Create the model
+    # Create the model (Claude or OpenAI)
     model_name = ctx.model or os.environ.get(
         "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
     )
 
-    model_kwargs = {
-        "model": model_name,
-        "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-        "max_tokens": 8192,
-    }
+    is_claude = model_name.startswith("claude")
 
-    # Add extended thinking if configured
-    if ctx.thinking_budget > 0:
-        model_kwargs["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": ctx.thinking_budget,
+    if is_claude:
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+            "max_tokens": 8192,
         }
 
-    model = ChatAnthropic(**model_kwargs)
+        # Add extended thinking if configured
+        if ctx.thinking_budget > 0:
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": ctx.thinking_budget,
+            }
+
+        model = ChatAnthropic(**model_kwargs)
+    else:
+        # OpenAI / GPT models
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("OPENAI_API_KEY"),
+            "max_tokens": 8192,
+        }
+
+        # Add reasoning effort for GPT models (if supported)
+        if ctx.reasoning_effort and ctx.reasoning_effort != "none":
+            model_kwargs["reasoning_effort"] = ctx.reasoning_effort
+
+        model = ChatOpenAI(**model_kwargs)
 
     # Bind tools to model
     model_with_tools = model.bind_tools(ALL_TOOLS)

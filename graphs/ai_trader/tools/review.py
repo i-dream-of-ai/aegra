@@ -5,9 +5,10 @@ import os
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from langgraph.runtime import get_runtime
 
-from ai_trader.context import Context, DEFAULT_REVIEWER_PROMPT
+from ai_trader.context import DEFAULT_REVIEWER_PROMPT, Context
 
 
 async def request_code_review(code: str, backtest_results: str | None = None) -> str:
@@ -38,12 +39,40 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
         if backtest_results:
             review_request += f"\n\nBacktest Results:\n{backtest_results}"
 
-        # Create the reviewer model
-        model = ChatAnthropic(
-            model=reviewer_model,
-            api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            max_tokens=4096,
-        )
+        # Determine model provider (Claude vs GPT)
+        is_claude = reviewer_model.startswith("claude")
+
+        if is_claude:
+            model_kwargs = {
+                "model": reviewer_model,
+                "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+                "max_tokens": 4096,
+            }
+
+            # Add extended thinking if configured for Claude reviewer
+            if ctx.reviewer_thinking_budget and ctx.reviewer_thinking_budget > 0:
+                model_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": ctx.reviewer_thinking_budget,
+                }
+
+            model = ChatAnthropic(**model_kwargs)
+        else:
+            # OpenAI / GPT models
+            model_kwargs = {
+                "model": reviewer_model,
+                "api_key": os.environ.get("OPENAI_API_KEY"),
+                "max_tokens": 4096,
+            }
+
+            # Add reasoning effort for GPT models
+            if (
+                ctx.reviewer_reasoning_effort
+                and ctx.reviewer_reasoning_effort != "none"
+            ):
+                model_kwargs["reasoning_effort"] = ctx.reviewer_reasoning_effort
+
+            model = ChatOpenAI(**model_kwargs)
 
         # Invoke the reviewer
         messages = [
