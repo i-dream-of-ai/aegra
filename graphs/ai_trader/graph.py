@@ -229,7 +229,7 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
 
     # Create the model (Claude or OpenAI)
     model_name = ctx.model or os.environ.get(
-        "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
+        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
     )
 
     is_claude = model_name.startswith("claude")
