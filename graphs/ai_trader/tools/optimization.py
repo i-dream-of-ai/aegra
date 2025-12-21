@@ -1,28 +1,17 @@
 """Optimization tools for QuantConnect."""
 
-import os
 import json
-from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
-from langchain_core.runnables import RunnableConfig
-from qc_api import qc_request
+import os
+
+from langgraph.runtime import get_runtime
+
+from ai_trader.context import Context
+from ai_trader.qc_api import qc_request
 
 
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    configurable = config.get("configurable", {})
-    project_id = configurable.get("qc_project_id")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
-
-
-@tool
 async def estimate_optimization(
     compile_id: str,
     parameters: list[dict],
-    config: Annotated[RunnableConfig, InjectedToolArg],
     node_type: str = "O2-8",
     parallel_nodes: int = 6,
 ) -> str:
@@ -36,13 +25,20 @@ async def estimate_optimization(
         parallel_nodes: Number of parallel nodes (default: 6)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
         qc_params = [
-            {"name": p["name"], "min": p.get("min", 0), "max": p.get("max", 100), "step": p.get("step", 1)}
+            {
+                "name": p["name"],
+                "min": p.get("min", 0),
+                "max": p.get("max", 100),
+                "step": p.get("step", 1),
+            }
             for p in parameters
         ]
 
@@ -65,28 +61,29 @@ async def estimate_optimization(
         )
 
         estimate = result.get("estimate", {})
-        return json.dumps({
-            "success": True,
-            "compile_id": compile_id,
-            "estimated_backtests": estimated_runs,
-            "parameters": parameters,
-            "node_type": node_type,
-            "parallel_nodes": parallel_nodes,
-            "qc_estimate": estimate,
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "compile_id": compile_id,
+                "estimated_backtests": estimated_runs,
+                "parameters": parameters,
+                "node_type": node_type,
+                "parallel_nodes": parallel_nodes,
+                "qc_estimate": estimate,
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to estimate: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to estimate: {e!s}"})
 
 
-@tool
 async def create_optimization(
     compile_id: str,
     optimization_name: str,
     target: str,
     target_to: str,
     parameters: list[dict],
-    config: Annotated[RunnableConfig, InjectedToolArg],
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
@@ -105,16 +102,20 @@ async def create_optimization(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
         if len(parameters) > 3:
-            return json.dumps({
-                "error": True,
-                "message": "QC limits optimizations to 3 parameters max.",
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "QC limits optimizations to 3 parameters max.",
+                }
+            )
 
         # Transform constraint operators
         operator_map = {
@@ -126,13 +127,21 @@ async def create_optimization(
             "notequal": "NotEqual",
         }
         transformed_constraints = []
-        for c in (constraints or []):
-            op = c.get("operator", "").lower().replace("_", "").replace("-", "").replace(" ", "")
-            transformed_constraints.append({
-                "target": c["target"],
-                "operator": operator_map.get(op, c["operator"]),
-                "targetValue": c["targetValue"],
-            })
+        for c in constraints or []:
+            op = (
+                c.get("operator", "")
+                .lower()
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "")
+            )
+            transformed_constraints.append(
+                {
+                    "target": c["target"],
+                    "operator": operator_map.get(op, c["operator"]),
+                    "targetValue": c["targetValue"],
+                }
+            )
 
         result = await qc_request(
             "/optimizations/create",
@@ -152,7 +161,9 @@ async def create_optimization(
             },
         )
 
-        opt_id = result.get("optimizations", [{}])[0].get("optimizationId") or result.get("optimizationId")
+        opt_id = result.get("optimizations", [{}])[0].get(
+            "optimizationId"
+        ) or result.get("optimizationId")
 
         # Calculate estimated runs
         estimated_runs = 1
@@ -160,28 +171,29 @@ async def create_optimization(
             steps = ((p.get("max", 100) - p.get("min", 0)) // p.get("step", 1)) + 1
             estimated_runs *= steps
 
-        return json.dumps({
-            "success": True,
-            "optimization_id": opt_id,
-            "optimization_name": optimization_name,
-            "compile_id": compile_id,
-            "target": target,
-            "target_to": target_to,
-            "estimated_backtests": estimated_runs,
-            "status": "running",
-            "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "optimization_id": opt_id,
+                "optimization_name": optimization_name,
+                "compile_id": compile_id,
+                "target": target,
+                "target_to": target_to,
+                "estimated_backtests": estimated_runs,
+                "status": "running",
+                "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
+            },
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to create optimization: {e!s}"}
+        )
 
 
-@tool
 async def read_optimization(
-    optimization_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    page: int = 1,
-    page_size: int = 20,
+    optimization_id: str, page: int = 1, page_size: int = 20
 ) -> str:
     """
     Read optimization status and paginated results.
@@ -192,7 +204,9 @@ async def read_optimization(
         page_size: Results per page (default: 20, max: 50)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -222,15 +236,17 @@ async def read_optimization(
         for i, bt in enumerate(page_results):
             stats = bt.get("statistics", {})
             params = bt.get("parameters", {})
-            results.append({
-                "rank": start + i + 1,
-                "parameters": params,
-                "net_profit": stats.get("Net Profit"),
-                "cagr": stats.get("Compounding Annual Return"),
-                "sharpe_ratio": stats.get("Sharpe Ratio"),
-                "max_drawdown": stats.get("Drawdown"),
-                "win_rate": stats.get("Win Rate"),
-            })
+            results.append(
+                {
+                    "rank": start + i + 1,
+                    "parameters": params,
+                    "net_profit": stats.get("Net Profit"),
+                    "cagr": stats.get("Compounding Annual Return"),
+                    "sharpe_ratio": stats.get("Sharpe Ratio"),
+                    "max_drawdown": stats.get("Drawdown"),
+                    "win_rate": stats.get("Win Rate"),
+                }
+            )
 
         # Best result
         best = None
@@ -244,32 +260,32 @@ async def read_optimization(
                 "sharpe_ratio": best_stats.get("Sharpe Ratio"),
             }
 
-        return json.dumps({
-            "optimization_id": optimization_id,
-            "name": opt.get("name", "Unknown"),
-            "status": opt.get("status", "Unknown"),
-            "progress": f"{(opt.get('progress', 0) * 100):.1f}%",
-            "best_result": best,
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "optimization_id": optimization_id,
+                "name": opt.get("name", "Unknown"),
+                "status": opt.get("status", "Unknown"),
+                "progress": f"{(opt.get('progress', 0) * 100):.1f}%",
+                "best_result": best,
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "results": results,
             },
-            "results": results,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read optimization: {e!s}"}
+        )
 
 
-@tool
-async def list_optimizations(
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    page: int = 1,
-    page_size: int = 10,
-) -> str:
+async def list_optimizations(page: int = 1, page_size: int = 10) -> str:
     """
     List optimizations for the current project with pagination.
 
@@ -278,7 +294,9 @@ async def list_optimizations(
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -297,34 +315,36 @@ async def list_optimizations(
 
         optimizations = []
         for opt in page_opts:
-            optimizations.append({
-                "optimization_id": opt.get("optimizationId"),
-                "name": opt.get("name", "Unknown"),
-                "status": opt.get("status", "Unknown"),
-                "created": opt.get("created"),
-            })
+            optimizations.append(
+                {
+                    "optimization_id": opt.get("optimizationId"),
+                    "name": opt.get("name", "Unknown"),
+                    "status": opt.get("status", "Unknown"),
+                    "created": opt.get("created"),
+                }
+            )
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "optimizations": optimizations,
             },
-            "optimizations": optimizations,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list optimizations: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to list optimizations: {e!s}"}
+        )
 
 
-@tool
-async def update_optimization(
-    optimization_id: str,
-    name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def update_optimization(optimization_id: str, name: str) -> str:
     """
     Update the name of an optimization.
 
@@ -333,7 +353,9 @@ async def update_optimization(
         name: New name
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -346,21 +368,21 @@ async def update_optimization(
             },
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f'Updated optimization name to "{name}"',
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f'Updated optimization name to "{name}"',
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update optimization: {e!s}"}
+        )
 
 
-@tool
-async def abort_optimization(
-    optimization_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def abort_optimization(optimization_id: str) -> str:
     """
     Abort a running optimization. Completed backtests will be kept.
 
@@ -368,7 +390,9 @@ async def abort_optimization(
         optimization_id: The optimization ID to abort
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -377,21 +401,21 @@ async def abort_optimization(
             {"projectId": qc_project_id, "optimizationId": optimization_id},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Aborted optimization {optimization_id}. Completed backtests are preserved.",
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Aborted optimization {optimization_id}. Completed backtests are preserved.",
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to abort optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to abort optimization: {e!s}"}
+        )
 
 
-@tool
-async def delete_optimization(
-    optimization_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def delete_optimization(optimization_id: str) -> str:
     """
     Delete an optimization and all its results. This cannot be undone.
 
@@ -399,7 +423,9 @@ async def delete_optimization(
         optimization_id: The optimization ID to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -408,11 +434,27 @@ async def delete_optimization(
             {"projectId": qc_project_id, "optimizationId": optimization_id},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Deleted optimization {optimization_id} and all results.",
-            "optimization_id": optimization_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Deleted optimization {optimization_id} and all results.",
+                "optimization_id": optimization_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete optimization: {str(e)}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to delete optimization: {e!s}"}
+        )
+
+
+# Export all tools
+TOOLS = [
+    estimate_optimization,
+    create_optimization,
+    read_optimization,
+    list_optimizations,
+    update_optimization,
+    abort_optimization,
+    delete_optimization,
+]

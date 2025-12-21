@@ -1,7 +1,6 @@
 {
   "graphs": {
     "agent": "./graphs/ai_trader/graph.py:graph",
-    "reviewer": "./graphs/ai_trader/graph.py:reviewer_graph",
     "react_agent": "./graphs/react_agent/graph.py:graph",
     "agent_hitl": "./graphs/react_agent_hitl/graph.py:graph",
     "subgraph_agent": "./graphs/subgraph_agent/graph.py:graph",

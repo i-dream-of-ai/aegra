@@ -1,42 +1,17 @@
 """Backtest tools for QuantConnect."""
 
-import os
-import json
-import time
 import asyncio
-from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
-from langchain_core.runnables import RunnableConfig
-from qc_api import qc_request
+import json
+import os
+import time
+
+from langgraph.runtime import get_runtime
+
+from ai_trader.context import Context
+from ai_trader.qc_api import qc_request
 
 
-def get_qc_project_id(config: RunnableConfig) -> int | None:
-    """Extract qc_project_id from RunnableConfig."""
-    # DEBUG: Log config type and contents
-    import structlog
-    logger = structlog.getLogger(__name__)
-    logger.info(f"[DEBUG] config type: {type(config)}, config: {config}")
-
-    if isinstance(config, str):
-        logger.error(f"[DEBUG] config is a string! value: {config[:200]}")
-        return None
-
-    configurable = config.get("configurable", {})
-    logger.info(f"[DEBUG] configurable: {configurable}")
-    project_id = configurable.get("qc_project_id")
-    logger.info(f"[DEBUG] qc_project_id from config: {project_id}")
-    if project_id is not None:
-        return int(project_id)
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
-
-
-@tool
-async def create_backtest(
-    compile_id: str,
-    backtest_name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def create_backtest(compile_id: str, backtest_name: str) -> str:
     """
     Create a backtest on QuantConnect using default parameter values.
 
@@ -45,7 +20,8 @@ async def create_backtest(
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -81,29 +57,29 @@ async def create_backtest(
 
         if status_backtest.get("error") or status_backtest.get("hasInitializeError"):
             error_msg = status_backtest.get("error", "Initialization error")
-            return json.dumps({
-                "success": False,
-                "backtest_id": backtest_id,
-                "error": error_msg,
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "backtest_id": backtest_id,
+                    "error": error_msg,
+                }
+            )
 
-        return json.dumps({
-            "success": True,
-            "backtest_id": backtest_id,
-            "backtest_name": backtest_name,
-            "status": status_backtest.get("status", "Running"),
-            "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "backtest_id": backtest_id,
+                "backtest_name": backtest_name,
+                "status": status_backtest.get("status", "Running"),
+                "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create backtest: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to create backtest: {e!s}"})
 
 
-@tool
-async def read_backtest(
-    backtest_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def read_backtest(backtest_id: str) -> str:
     """
     Read backtest status and key statistics from QuantConnect.
 
@@ -111,7 +87,9 @@ async def read_backtest(
         backtest_id: The backtest ID to read
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -126,35 +104,36 @@ async def read_backtest(
 
         stats = backtest.get("statistics", {})
 
-        return json.dumps({
-            "backtest_id": backtest_id,
-            "name": backtest.get("name", "Unknown"),
-            "status": "Completed" if backtest.get("completed") else "Running",
-            "completed": backtest.get("completed", False),
-            "statistics": {
-                "net_profit": stats.get("Net Profit", "N/A"),
-                "cagr": stats.get("Compounding Annual Return", "N/A"),
-                "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                "max_drawdown": stats.get("Drawdown", "N/A"),
-                "win_rate": stats.get("Win Rate", "N/A"),
-                "total_trades": stats.get("Total Trades", "N/A"),
-                "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
-                "average_win": stats.get("Average Win", "N/A"),
-                "average_loss": stats.get("Average Loss", "N/A"),
+        return json.dumps(
+            {
+                "backtest_id": backtest_id,
+                "name": backtest.get("name", "Unknown"),
+                "status": "Completed" if backtest.get("completed") else "Running",
+                "completed": backtest.get("completed", False),
+                "statistics": {
+                    "net_profit": stats.get("Net Profit", "N/A"),
+                    "cagr": stats.get("Compounding Annual Return", "N/A"),
+                    "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
+                    "max_drawdown": stats.get("Drawdown", "N/A"),
+                    "win_rate": stats.get("Win Rate", "N/A"),
+                    "total_trades": stats.get("Total Trades", "N/A"),
+                    "profit_factor": stats.get(
+                        "Profit-Loss Ratio", stats.get("Expectancy", "N/A")
+                    ),
+                    "average_win": stats.get("Average Win", "N/A"),
+                    "average_loss": stats.get("Average Loss", "N/A"),
+                },
+                "error": backtest.get("error") if backtest.get("error") else None,
             },
-            "error": backtest.get("error") if backtest.get("error") else None,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read backtest: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to read backtest: {e!s}"})
 
 
-@tool
 async def read_backtest_chart(
-    backtest_id: str,
-    name: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    sample_count: int = 100,
+    backtest_id: str, name: str, sample_count: int = 100
 ) -> str:
     """
     Read chart data from a backtest. Returns metadata for frontend to display.
@@ -165,7 +144,9 @@ async def read_backtest_chart(
         sample_count: Number of data points (default: 100, max: 200)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -186,37 +167,39 @@ async def read_backtest_chart(
         series_names = list(series.keys())
 
         if not series_names:
-            return json.dumps({
-                "error": True,
-                "message": f'Chart "{name}" has no series data.',
-                "backtest_id": backtest_id,
-            })
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f'Chart "{name}" has no series data.',
+                    "backtest_id": backtest_id,
+                }
+            )
 
-        return json.dumps({
-            "_chartRequest": True,
-            "success": True,
-            "project_id": qc_project_id,
-            "backtest_id": backtest_id,
-            "chart_name": name,
-            "sample_count": effective_count,
-            "series_names": series_names,
-            "message": f'Chart "{name}" ready with {len(series_names)} series.',
-        })
+        return json.dumps(
+            {
+                "_chartRequest": True,
+                "success": True,
+                "project_id": qc_project_id,
+                "backtest_id": backtest_id,
+                "chart_name": name,
+                "sample_count": effective_count,
+                "series_names": series_names,
+                "message": f'Chart "{name}" ready with {len(series_names)} series.',
+            }
+        )
 
     except Exception as e:
-        return json.dumps({
-            "error": True,
-            "message": f"Failed to read chart: {str(e)}",
-            "hint": 'Common charts: "Strategy Equity", "Benchmark", "Drawdown".',
-        })
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to read chart: {e!s}",
+                "hint": 'Common charts: "Strategy Equity", "Benchmark", "Drawdown".',
+            }
+        )
 
 
-@tool
 async def read_backtest_orders(
-    backtest_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    page: int = 1,
-    page_size: int = 50,
+    backtest_id: str, page: int = 1, page_size: int = 50
 ) -> str:
     """
     Read paginated order history from a backtest.
@@ -227,7 +210,9 @@ async def read_backtest_orders(
         page_size: Orders per page (default: 50, max: 100)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -248,28 +233,27 @@ async def read_backtest_orders(
         total_orders = data.get("totalOrders", len(orders))
         total_pages = (total_orders + page_size - 1) // page_size
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total_orders,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total_orders,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "backtest_id": backtest_id,
+                "orders": orders,
             },
-            "backtest_id": backtest_id,
-            "orders": orders,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read orders: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to read orders: {e!s}"})
 
 
-@tool
 async def read_backtest_insights(
-    backtest_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    start: int = 0,
-    end: int = 100,
+    backtest_id: str, start: int = 0, end: int = 100
 ) -> str:
     """
     Read insights from a backtest.
@@ -280,7 +264,9 @@ async def read_backtest_insights(
         end: End index (default: 100)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -297,15 +283,10 @@ async def read_backtest_insights(
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read insights: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to read insights: {e!s}"})
 
 
-@tool
-async def list_backtests(
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    page: int = 1,
-    page_size: int = 10,
-) -> str:
+async def list_backtests(page: int = 1, page_size: int = 10) -> str:
     """
     List backtests for current project with pagination.
 
@@ -314,7 +295,9 @@ async def list_backtests(
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -334,38 +317,39 @@ async def list_backtests(
         backtests = []
         for bt in page_backtests:
             stats = bt.get("statistics", {})
-            backtests.append({
-                "backtest_id": bt.get("backtestId"),
-                "name": bt.get("name", "Unknown"),
-                "status": "Completed" if bt.get("completed") else "Running",
-                "created": bt.get("created"),
-                "net_profit": stats.get("Net Profit"),
-                "cagr": stats.get("Compounding Annual Return"),
-                "sharpe_ratio": stats.get("Sharpe Ratio"),
-                "max_drawdown": stats.get("Drawdown"),
-            })
+            backtests.append(
+                {
+                    "backtest_id": bt.get("backtestId"),
+                    "name": bt.get("name", "Unknown"),
+                    "status": "Completed" if bt.get("completed") else "Running",
+                    "created": bt.get("created"),
+                    "net_profit": stats.get("Net Profit"),
+                    "cagr": stats.get("Compounding Annual Return"),
+                    "sharpe_ratio": stats.get("Sharpe Ratio"),
+                    "max_drawdown": stats.get("Drawdown"),
+                }
+            )
 
-        return json.dumps({
-            "pagination": {
-                "current_page": page,
-                "page_size": page_size,
-                "total_results": total,
-                "total_pages": total_pages,
-                "has_more_pages": page < total_pages,
+        return json.dumps(
+            {
+                "pagination": {
+                    "current_page": page,
+                    "page_size": page_size,
+                    "total_results": total,
+                    "total_pages": total_pages,
+                    "has_more_pages": page < total_pages,
+                },
+                "backtests": backtests,
             },
-            "backtests": backtests,
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list backtests: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to list backtests: {e!s}"})
 
 
-@tool
 async def update_backtest(
-    backtest_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-    name: str = None,
-    note: str = None,
+    backtest_id: str, name: str = None, note: str = None
 ) -> str:
     """
     Update a backtest name and/or note.
@@ -376,7 +360,9 @@ async def update_backtest(
         note: Note/description (optional)
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -397,21 +383,19 @@ async def update_backtest(
         if note:
             updated.append("note")
 
-        return json.dumps({
-            "success": True,
-            "message": f"Updated backtest: {', '.join(updated)}",
-            "backtest_id": backtest_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Updated backtest: {', '.join(updated)}",
+                "backtest_id": backtest_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update backtest: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to update backtest: {e!s}"})
 
 
-@tool
-async def delete_backtest(
-    backtest_id: str,
-    config: Annotated[RunnableConfig, InjectedToolArg],
-) -> str:
+async def delete_backtest(backtest_id: str) -> str:
     """
     Delete a backtest. This action cannot be undone.
 
@@ -419,7 +403,9 @@ async def delete_backtest(
         backtest_id: The backtest ID to delete
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        runtime = get_runtime(Context)
+        qc_project_id = runtime.context.qc_project_id
+
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
@@ -428,11 +414,26 @@ async def delete_backtest(
             {"projectId": qc_project_id, "backtestId": backtest_id},
         )
 
-        return json.dumps({
-            "success": True,
-            "message": f"Deleted backtest {backtest_id}.",
-            "backtest_id": backtest_id,
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Deleted backtest {backtest_id}.",
+                "backtest_id": backtest_id,
+            }
+        )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete backtest: {str(e)}"})
+        return json.dumps({"error": True, "message": f"Failed to delete backtest: {e!s}"})
+
+
+# Export all tools
+TOOLS = [
+    create_backtest,
+    read_backtest,
+    read_backtest_chart,
+    read_backtest_orders,
+    read_backtest_insights,
+    list_backtests,
+    update_backtest,
+    delete_backtest,
+]
