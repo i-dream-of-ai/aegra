@@ -15,7 +15,15 @@ from thread_context import get_qc_project_id_from_thread
 
 async def no_project_error(config: RunnableConfig) -> str:
     """Return a JSON error with debug info when project context is missing."""
-    configurable = config.get("configurable", {}) if config else {}
+    # Defensive type check
+    if config is None or not isinstance(config, dict):
+        return json.dumps({
+            "error": True,
+            "message": "No project context - config is invalid.",
+            "debug": {"config_type": type(config).__name__ if config else "None"},
+        })
+
+    configurable = config.get("configurable", {})
 
     # Try to get thread metadata for debugging
     thread_id = configurable.get("thread_id")

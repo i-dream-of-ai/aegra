@@ -71,7 +71,16 @@ async def get_qc_project_id_from_thread(config: RunnableConfig) -> int | None:
     Returns:
         The QuantConnect project ID or None
     """
-    configurable = config.get("configurable", {}) if config else {}
+    # Defensive type check - config should be a dict
+    if config is None:
+        return None
+    if not isinstance(config, dict):
+        import structlog
+        logger = structlog.get_logger()
+        logger.warning(f"get_qc_project_id_from_thread received non-dict config: {type(config).__name__}, value: {str(config)[:100]}")
+        return None
+
+    configurable = config.get("configurable", {})
     thread_id = configurable.get("thread_id")
 
     if not thread_id:
@@ -103,7 +112,16 @@ async def get_project_db_id_from_thread(config: RunnableConfig) -> str | None:
     Returns:
         The Supabase project ID or None
     """
-    configurable = config.get("configurable", {}) if config else {}
+    # Defensive type check - config should be a dict
+    if config is None:
+        return None
+    if not isinstance(config, dict):
+        import structlog
+        logger = structlog.get_logger()
+        logger.warning(f"get_project_db_id_from_thread received non-dict config: {type(config).__name__}, value: {str(config)[:100]}")
+        return None
+
+    configurable = config.get("configurable", {})
     thread_id = configurable.get("thread_id")
 
     if not thread_id:
