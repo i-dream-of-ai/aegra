@@ -28,7 +28,9 @@ async def upload_object(key: str, content: str) -> str:
             return json.dumps({"error": True, "message": "Missing QC credentials."})
 
         if not key or not content:
-            return json.dumps({"error": True, "message": "key and content are required."})
+            return json.dumps(
+                {"error": True, "message": "key and content are required."}
+            )
 
         # Generate auth headers
         timestamp = int(time.time())
@@ -48,12 +50,29 @@ async def upload_object(key: str, content: str) -> str:
                 files=files,
             )
 
-            result = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"raw": response.text}
+            result = (
+                response.json()
+                if response.headers.get("content-type", "").startswith(
+                    "application/json"
+                )
+                else {"raw": response.text}
+            )
 
             if not response.is_success or result.get("success") is False:
-                return json.dumps({"error": True, "message": f"Upload failed: {result.get('errors', response.text)}"})
+                return json.dumps(
+                    {
+                        "error": True,
+                        "message": f"Upload failed: {result.get('errors', response.text)}",
+                    }
+                )
 
-        return json.dumps({"success": True, "message": f"Successfully uploaded object: {key}", "key": key})
+        return json.dumps(
+            {
+                "success": True,
+                "message": f"Successfully uploaded object: {key}",
+                "key": key,
+            }
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to upload object: {e!s}"})
@@ -69,13 +88,19 @@ async def read_object_properties(key: str) -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
-        data = await qc_request("/object/properties", {"organizationId": org_id, "key": key})
+        data = await qc_request(
+            "/object/properties", {"organizationId": org_id, "key": key}
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to read object properties: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to read object properties: {e!s}"}
+        )
 
 
 async def list_object_store_files(path: str = "") -> str:
@@ -88,13 +113,19 @@ async def list_object_store_files(path: str = "") -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
-        data = await qc_request("/object/list", {"organizationId": org_id, "path": path or ""})
+        data = await qc_request(
+            "/object/list", {"organizationId": org_id, "path": path or ""}
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list object store files: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to list object store files: {e!s}"}
+        )
 
 
 async def delete_object(key: str) -> str:
@@ -107,10 +138,14 @@ async def delete_object(key: str) -> str:
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         if not org_id:
-            return json.dumps({"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."})
+            return json.dumps(
+                {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
+            )
 
         await qc_request("/object/delete", {"organizationId": org_id, "key": key})
-        return json.dumps({"success": True, "message": f"Successfully deleted object: {key}"})
+        return json.dumps(
+            {"success": True, "message": f"Successfully deleted object: {key}"}
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to delete object: {e!s}"})

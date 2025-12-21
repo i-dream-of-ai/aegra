@@ -22,11 +22,16 @@ async def check_initialization_errors(code: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/check-initialization-errors", {"projectId": qc_project_id, "code": code})
+        data = await qc_request(
+            "/ai-services/check-initialization-errors",
+            {"projectId": qc_project_id, "code": code},
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to check initialization errors: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to check initialization errors: {e!s}"}
+        )
 
 
 async def complete_code(code: str, cursor_position: int) -> str:
@@ -42,11 +47,20 @@ async def complete_code(code: str, cursor_position: int) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/complete-code", {"projectId": qc_project_id, "code": code, "cursorPosition": cursor_position})
+        data = await qc_request(
+            "/ai-services/complete-code",
+            {
+                "projectId": qc_project_id,
+                "code": code,
+                "cursorPosition": cursor_position,
+            },
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code completion: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to get code completion: {e!s}"}
+        )
 
 
 async def enhance_error_message(error_message: str, code: str) -> str:
@@ -62,11 +76,16 @@ async def enhance_error_message(error_message: str, code: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/enhance-error", {"projectId": qc_project_id, "errorMessage": error_message, "code": code})
+        data = await qc_request(
+            "/ai-services/enhance-error",
+            {"projectId": qc_project_id, "errorMessage": error_message, "code": code},
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to enhance error message: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to enhance error message: {e!s}"}
+        )
 
 
 async def check_syntax(code: str) -> str:
@@ -81,7 +100,9 @@ async def check_syntax(code: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/check-syntax", {"projectId": qc_project_id, "code": code})
+        data = await qc_request(
+            "/ai-services/check-syntax", {"projectId": qc_project_id, "code": code}
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -100,11 +121,15 @@ async def update_code_to_pep8(code: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/pep8", {"projectId": qc_project_id, "code": code})
+        data = await qc_request(
+            "/ai-services/pep8", {"projectId": qc_project_id, "code": code}
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to format code to PEP8: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to format code to PEP8: {e!s}"}
+        )
 
 
 async def search_quantconnect(query: str) -> str:
@@ -119,7 +144,9 @@ async def search_quantconnect(query: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        data = await qc_request("/ai-services/search", {"projectId": qc_project_id, "query": query})
+        data = await qc_request(
+            "/ai-services/search", {"projectId": qc_project_id, "query": query}
+        )
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -129,7 +156,9 @@ async def search_quantconnect(query: str) -> str:
 async def _generate_embedding(text: str) -> list[float]:
     """Generate embedding using OpenAI."""
     client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    response = await client.embeddings.create(model="text-embedding-3-large", input=text, encoding_format="float")
+    response = await client.embeddings.create(
+        model="text-embedding-3-large", input=text, encoding_format="float"
+    )
     return response.data[0].embedding
 
 
@@ -149,15 +178,31 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
         vector_string = f"[{','.join(str(x) for x in embedding)}]"
 
         client = SupabaseClient(use_service_role=True)
-        results = await client.rpc("match_algorithms", {"query_embedding": vector_string, "match_threshold": 0.4, "match_count": min(limit, 10)})
+        results = await client.rpc(
+            "match_algorithms",
+            {
+                "query_embedding": vector_string,
+                "match_threshold": 0.4,
+                "match_count": min(limit, 10),
+            },
+        )
 
-        return json.dumps({
-            "searchInfo": {"query": query, "resultsReturned": len(results or [])},
-            "results": [
-                {"rank": i + 1, "id": r.get("id"), "file_path": r.get("file_path"), "summary": r.get("summary"), "tags": r.get("tags")}
-                for i, r in enumerate(results or [])
-            ],
-        }, indent=2)
+        return json.dumps(
+            {
+                "searchInfo": {"query": query, "resultsReturned": len(results or [])},
+                "results": [
+                    {
+                        "rank": i + 1,
+                        "id": r.get("id"),
+                        "file_path": r.get("file_path"),
+                        "summary": r.get("summary"),
+                        "tags": r.get("tags"),
+                    }
+                    for i, r in enumerate(results or [])
+                ],
+            },
+            indent=2,
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to search: {e!s}"})
@@ -174,7 +219,13 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         if not algorithm_id:
             return json.dumps({"error": True, "message": "algorithm_id is required."})
 
-        is_uuid = bool(re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", algorithm_id, re.IGNORECASE))
+        is_uuid = bool(
+            re.match(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                algorithm_id,
+                re.IGNORECASE,
+            )
+        )
         params = {"select": "id,file_path,code,summary,tags", "limit": "1"}
         if is_uuid:
             params["id"] = f"eq.{algorithm_id}"
@@ -185,19 +236,24 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         data = await client.select("algorithm_knowledge_base", params)
 
         if not data:
-            return json.dumps({"error": True, "message": f"Algorithm not found: {algorithm_id}"})
+            return json.dumps(
+                {"error": True, "message": f"Algorithm not found: {algorithm_id}"}
+            )
 
         algorithm = data[0]
         code = algorithm.get("code", "")
         if len(code) > 80000:
             code = code[:80000] + "\n\n... [CODE TRUNCATED]"
 
-        return json.dumps({
-            "id": algorithm.get("id"),
-            "file_path": algorithm.get("file_path"),
-            "summary": algorithm.get("summary"),
-            "code": code,
-        }, indent=2)
+        return json.dumps(
+            {
+                "id": algorithm.get("id"),
+                "file_path": algorithm.get("file_path"),
+                "summary": algorithm.get("summary"),
+                "code": code,
+            },
+            indent=2,
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Failed to get code: {e!s}"})

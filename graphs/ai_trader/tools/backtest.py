@@ -76,7 +76,9 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to create backtest: {e!s}"}
+        )
 
 
 async def read_backtest(backtest_id: str) -> str:
@@ -345,12 +347,12 @@ async def list_backtests(page: int = 1, page_size: int = 10) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list backtests: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to list backtests: {e!s}"}
+        )
 
 
-async def update_backtest(
-    backtest_id: str, name: str = None, note: str = None
-) -> str:
+async def update_backtest(backtest_id: str, name: str = None, note: str = None) -> str:
     """
     Update a backtest name and/or note.
 
@@ -392,7 +394,9 @@ async def update_backtest(
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update backtest: {e!s}"}
+        )
 
 
 async def delete_backtest(backtest_id: str) -> str:
@@ -423,7 +427,9 @@ async def delete_backtest(backtest_id: str) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to delete backtest: {e!s}"}
+        )
 
 
 # Export all tools

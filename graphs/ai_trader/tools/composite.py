@@ -10,7 +10,9 @@ from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
 
 
-async def _poll_compile(qc_project_id: int, compile_id: str, timeout: int = 30) -> tuple[bool, str | None]:
+async def _poll_compile(
+    qc_project_id: int, compile_id: str, timeout: int = 30
+) -> tuple[bool, str | None]:
     """Poll for compile completion."""
     for _ in range(timeout):
         await asyncio.sleep(1)
@@ -30,7 +32,9 @@ async def _poll_compile(qc_project_id: int, compile_id: str, timeout: int = 30) 
     return False, "Compilation timed out"
 
 
-async def _poll_backtest(qc_project_id: int, backtest_id: str, timeout: int = 60) -> tuple[dict | None, str | None]:
+async def _poll_backtest(
+    qc_project_id: int, backtest_id: str, timeout: int = 60
+) -> tuple[dict | None, str | None]:
     """Poll for backtest completion."""
     for _ in range(timeout):
         await asyncio.sleep(3)
@@ -76,25 +80,38 @@ async def compile_and_backtest(backtest_name: str) -> str:
 
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
         if not is_compiled:
-            return json.dumps({"error": True, "compile_id": compile_id, "message": f"Compilation failed: {compile_error}"})
+            return json.dumps(
+                {
+                    "error": True,
+                    "compile_id": compile_id,
+                    "message": f"Compilation failed: {compile_error}",
+                }
+            )
 
         # Backtest
         backtest_data = await qc_request(
             "/backtests/create",
-            {"projectId": qc_project_id, "organizationId": org_id, "compileId": compile_id, "backtestName": backtest_name},
+            {
+                "projectId": qc_project_id,
+                "organizationId": org_id,
+                "compileId": compile_id,
+                "backtestName": backtest_name,
+            },
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        return json.dumps({
-            "success": True,
-            "compile_id": compile_id,
-            "backtest_id": backtest_id,
-            "backtest_name": backtest_name,
-            "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "compile_id": compile_id,
+                "backtest_id": backtest_id,
+                "backtest_name": backtest_name,
+                "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
+            }
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
@@ -130,7 +147,12 @@ async def compile_and_optimize(
             return json.dumps({"error": True, "message": "No project context."})
 
         if len(parameters) > 3:
-            return json.dumps({"error": True, "message": "QC limits optimizations to 3 parameters max."})
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": "QC limits optimizations to 3 parameters max.",
+                }
+            )
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
@@ -138,7 +160,13 @@ async def compile_and_optimize(
 
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
         if not is_compiled:
-            return json.dumps({"error": True, "compile_id": compile_id, "message": f"Compilation failed: {compile_error}"})
+            return json.dumps(
+                {
+                    "error": True,
+                    "compile_id": compile_id,
+                    "message": f"Compilation failed: {compile_error}",
+                }
+            )
 
         # Optimization
         result = await qc_request(
@@ -159,27 +187,34 @@ async def compile_and_optimize(
             },
         )
 
-        opt_id = result.get("optimizations", [{}])[0].get("optimizationId") or result.get("optimizationId")
+        opt_id = result.get("optimizations", [{}])[0].get(
+            "optimizationId"
+        ) or result.get("optimizationId")
 
         estimated_runs = 1
         for p in parameters:
             steps = ((p.get("max", 100) - p.get("min", 0)) // p.get("step", 1)) + 1
             estimated_runs *= steps
 
-        return json.dumps({
-            "success": True,
-            "compile_id": compile_id,
-            "optimization_id": opt_id,
-            "optimization_name": optimization_name,
-            "estimated_backtests": estimated_runs,
-            "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "compile_id": compile_id,
+                "optimization_id": opt_id,
+                "optimization_name": optimization_name,
+                "estimated_backtests": estimated_runs,
+                "message": f'Optimization "{optimization_name}" created! Use read_optimization with ID: {opt_id}',
+            },
+            indent=2,
+        )
 
     except Exception as e:
         return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
 
 
-async def update_and_run_backtest(file_name: str, file_content: str, backtest_name: str) -> str:
+async def update_and_run_backtest(
+    file_name: str, file_content: str, backtest_name: str
+) -> str:
     """
     Update file with COMPLETE new content, compile, and run backtest.
 
@@ -197,7 +232,10 @@ async def update_and_run_backtest(file_name: str, file_content: str, backtest_na
             return json.dumps({"success": False, "error": "No project context."})
 
         # Update file
-        await qc_request("/files/update", {"projectId": qc_project_id, "name": file_name, "content": file_content})
+        await qc_request(
+            "/files/update",
+            {"projectId": qc_project_id, "name": file_name, "content": file_content},
+        )
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
@@ -205,12 +243,23 @@ async def update_and_run_backtest(file_name: str, file_content: str, backtest_na
 
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
         if not is_compiled:
-            return json.dumps({"success": False, "compile_id": compile_id, "error": f"Compilation failed: {compile_error}"})
+            return json.dumps(
+                {
+                    "success": False,
+                    "compile_id": compile_id,
+                    "error": f"Compilation failed: {compile_error}",
+                }
+            )
 
         # Backtest
         backtest_data = await qc_request(
             "/backtests/create",
-            {"projectId": qc_project_id, "organizationId": org_id, "compileId": compile_id, "backtestName": backtest_name},
+            {
+                "projectId": qc_project_id,
+                "organizationId": org_id,
+                "compileId": compile_id,
+                "backtestName": backtest_name,
+            },
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
@@ -218,33 +267,44 @@ async def update_and_run_backtest(file_name: str, file_content: str, backtest_na
         backtest_id = backtest.get("backtestId")
 
         # Poll for results
-        backtest_result, backtest_error = await _poll_backtest(qc_project_id, backtest_id)
+        backtest_result, backtest_error = await _poll_backtest(
+            qc_project_id, backtest_id
+        )
 
         if backtest_error:
-            return json.dumps({"success": False, "backtest_id": backtest_id, "error": backtest_error})
+            return json.dumps(
+                {"success": False, "backtest_id": backtest_id, "error": backtest_error}
+            )
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
-            return json.dumps({
-                "success": True,
-                "file_updated": file_name,
-                "backtest_id": backtest_id,
-                "completed": True,
-                "statistics": {
-                    "net_profit": stats.get("Net Profit", "N/A"),
-                    "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                    "max_drawdown": stats.get("Drawdown", "N/A"),
-                    "total_trades": stats.get("Total Trades", "N/A"),
+            return json.dumps(
+                {
+                    "success": True,
+                    "file_updated": file_name,
+                    "backtest_id": backtest_id,
+                    "completed": True,
+                    "statistics": {
+                        "net_profit": stats.get("Net Profit", "N/A"),
+                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
+                        "max_drawdown": stats.get("Drawdown", "N/A"),
+                        "total_trades": stats.get("Total Trades", "N/A"),
+                    },
                 },
-            }, indent=2)
+                indent=2,
+            )
 
-        return json.dumps({"success": True, "backtest_id": backtest_id, "status": "Running"})
+        return json.dumps(
+            {"success": True, "backtest_id": backtest_id, "status": "Running"}
+        )
 
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
-async def edit_and_run_backtest(file_name: str, edits: list[dict], backtest_name: str) -> str:
+async def edit_and_run_backtest(
+    file_name: str, edits: list[dict], backtest_name: str
+) -> str:
     """
     Edit file using search-and-replace, then compile and run backtest.
 
@@ -262,11 +322,19 @@ async def edit_and_run_backtest(file_name: str, edits: list[dict], backtest_name
             return json.dumps({"success": False, "error": "No project context."})
 
         # Read current file
-        files_data = await qc_request("/files/read", {"projectId": qc_project_id, "name": file_name})
+        files_data = await qc_request(
+            "/files/read", {"projectId": qc_project_id, "name": file_name}
+        )
         files = files_data.get("files", [])
         if not files:
-            return json.dumps({"success": False, "error": f"File '{file_name}' not found"})
-        current_content = files[0].get("content", "") if isinstance(files, list) else files_data.get("content", "")
+            return json.dumps(
+                {"success": False, "error": f"File '{file_name}' not found"}
+            )
+        current_content = (
+            files[0].get("content", "")
+            if isinstance(files, list)
+            else files_data.get("content", "")
+        )
 
         # Apply edits
         updated_content = current_content
@@ -274,15 +342,24 @@ async def edit_and_run_backtest(file_name: str, edits: list[dict], backtest_name
             old_content = edit.get("old_content", "")
             new_content = edit.get("new_content", "")
             if not old_content:
-                return json.dumps({"success": False, "error": f"Edit {i + 1}: old_content required"})
+                return json.dumps(
+                    {"success": False, "error": f"Edit {i + 1}: old_content required"}
+                )
             if updated_content.count(old_content) == 0:
-                return json.dumps({"success": False, "error": f"Edit {i + 1}: old_content not found"})
+                return json.dumps(
+                    {"success": False, "error": f"Edit {i + 1}: old_content not found"}
+                )
             if updated_content.count(old_content) > 1:
-                return json.dumps({"success": False, "error": f"Edit {i + 1}: old_content not unique"})
+                return json.dumps(
+                    {"success": False, "error": f"Edit {i + 1}: old_content not unique"}
+                )
             updated_content = updated_content.replace(old_content, new_content)
 
         # Update file
-        await qc_request("/files/update", {"projectId": qc_project_id, "name": file_name, "content": updated_content})
+        await qc_request(
+            "/files/update",
+            {"projectId": qc_project_id, "name": file_name, "content": updated_content},
+        )
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
@@ -290,12 +367,19 @@ async def edit_and_run_backtest(file_name: str, edits: list[dict], backtest_name
 
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
         if not is_compiled:
-            return json.dumps({"success": False, "error": f"Compilation failed: {compile_error}"})
+            return json.dumps(
+                {"success": False, "error": f"Compilation failed: {compile_error}"}
+            )
 
         # Backtest
         backtest_data = await qc_request(
             "/backtests/create",
-            {"projectId": qc_project_id, "organizationId": org_id, "compileId": compile_id, "backtestName": backtest_name},
+            {
+                "projectId": qc_project_id,
+                "organizationId": org_id,
+                "compileId": compile_id,
+                "backtestName": backtest_name,
+            },
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
@@ -303,28 +387,37 @@ async def edit_and_run_backtest(file_name: str, edits: list[dict], backtest_name
         backtest_id = backtest.get("backtestId")
 
         # Poll for results
-        backtest_result, backtest_error = await _poll_backtest(qc_project_id, backtest_id)
+        backtest_result, backtest_error = await _poll_backtest(
+            qc_project_id, backtest_id
+        )
 
         if backtest_error:
-            return json.dumps({"success": False, "backtest_id": backtest_id, "error": backtest_error})
+            return json.dumps(
+                {"success": False, "backtest_id": backtest_id, "error": backtest_error}
+            )
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
-            return json.dumps({
-                "success": True,
-                "file_updated": file_name,
-                "edits_applied": len(edits),
-                "backtest_id": backtest_id,
-                "completed": True,
-                "statistics": {
-                    "net_profit": stats.get("Net Profit", "N/A"),
-                    "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                    "max_drawdown": stats.get("Drawdown", "N/A"),
-                    "total_trades": stats.get("Total Trades", "N/A"),
+            return json.dumps(
+                {
+                    "success": True,
+                    "file_updated": file_name,
+                    "edits_applied": len(edits),
+                    "backtest_id": backtest_id,
+                    "completed": True,
+                    "statistics": {
+                        "net_profit": stats.get("Net Profit", "N/A"),
+                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
+                        "max_drawdown": stats.get("Drawdown", "N/A"),
+                        "total_trades": stats.get("Total Trades", "N/A"),
+                    },
                 },
-            }, indent=2)
+                indent=2,
+            )
 
-        return json.dumps({"success": True, "backtest_id": backtest_id, "status": "Running"})
+        return json.dumps(
+            {"success": True, "backtest_id": backtest_id, "status": "Running"}
+        )
 
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})

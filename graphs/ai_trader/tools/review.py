@@ -57,9 +57,7 @@ async def request_code_review(code: str, backtest_results: str | None = None) ->
         # Handle content blocks if needed
         if isinstance(review_content, list):
             review_content = "\n".join(
-                block.get("text", str(block))
-                if isinstance(block, dict)
-                else str(block)
+                block.get("text", str(block)) if isinstance(block, dict) else str(block)
                 for block in review_content
             )
 
