@@ -84,7 +84,6 @@ ignore = [
     "E501",  # line too long (handled by formatter)
     "B008",  # do not perform function calls in argument defaults (FastAPI Depends)
     "UP007", # use X | Y for type annotations (keep Optional for clarity)
-    "UP038", # use X | Y in isinstance (causes issues in some contexts)
     "TC002", # type-checking imports cause issues with SQLAlchemy, Pydantic, etc.
     "TC003", # type-checking imports cause issues with SQLAlchemy, Pydantic, etc.
 ]
@@ -96,6 +95,11 @@ ignore = [
 ]
 "alembic/**/*.py" = [
     "ERA",   # commented code in migrations is intentional
+]
+"graphs/**/*.py" = [
+    "E402",  # module level import not at top (path setup needed first)
+    "ERA001", # organizational comments in tool lists are intentional
+    "ARG001", # injected arguments (InjectedToolArg) appear unused but are used by LangChain
 ]
 
 [tool.ruff.format]

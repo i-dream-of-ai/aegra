@@ -5,12 +5,11 @@ Analyzes conversation to understand user intent and generates
 targeted retrieval queries for skills/knowledge.
 """
 
-import os
 import json
-from typing import List, Optional
 from dataclasses import dataclass
+
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 
 @dataclass
@@ -18,9 +17,9 @@ class RetrievalPlan:
     """Output from the planner agent."""
 
     user_intent: str
-    keyword_queries: List[str]
-    semantic_queries: List[str]
-    skip_reason: Optional[str] = None
+    keyword_queries: list[str]
+    semantic_queries: list[str]
+    skip_reason: str | None = None
 
 
 # Planner system prompt
@@ -48,7 +47,7 @@ Keep queries specific and actionable. Max 5 keyword queries, max 3 semantic quer
 
 
 async def generate_retrieval_plan(
-    messages: List[dict],
+    messages: list[dict],
     recent_context: str,
 ) -> RetrievalPlan:
     """
@@ -131,7 +130,7 @@ Output JSON with user_intent, keyword_queries, and semantic_queries."""
     )
 
 
-def extract_simple_keywords(text: str) -> List[str]:
+def extract_simple_keywords(text: str) -> list[str]:
     """Extract simple keywords from text as fallback."""
     # Common trading/QC keywords to look for
     trading_keywords = {

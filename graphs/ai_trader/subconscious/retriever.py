@@ -7,14 +7,14 @@ Retrieves relevant skills from the database using:
 """
 
 import os
+
 import httpx
-from typing import List, Optional
 from openai import AsyncOpenAI
 
 from .types import RetrievedSkill
 
 # OpenAI client for embeddings
-_openai_client: Optional[AsyncOpenAI] = None
+_openai_client: AsyncOpenAI | None = None
 
 
 def get_openai_client() -> AsyncOpenAI:
@@ -25,7 +25,7 @@ def get_openai_client() -> AsyncOpenAI:
     return _openai_client
 
 
-async def generate_embedding(text: str) -> List[float]:
+async def generate_embedding(text: str) -> list[float]:
     """Generate embedding for a query string."""
     client = get_openai_client()
     response = await client.embeddings.create(
@@ -58,10 +58,10 @@ def format_skill_content(skill: dict) -> str:
 
 
 async def retrieve_skills_by_keywords(
-    keywords: List[str],
+    keywords: list[str],
     access_token: str,
     limit: int = 7,
-) -> List[RetrievedSkill]:
+) -> list[RetrievedSkill]:
     """
     Retrieve skills by keyword/tag matching.
     Uses GIN index on tags column for fast lookup.
@@ -122,7 +122,7 @@ async def retrieve_skills_by_embedding(
     access_token: str,
     limit: int = 5,
     min_similarity: float = 0.3,
-) -> List[RetrievedSkill]:
+) -> list[RetrievedSkill]:
     """
     Retrieve skills by semantic similarity using pgvector.
     """
@@ -180,7 +180,7 @@ async def retrieve_skills_by_embedding(
 
 async def retrieve_always_skills(
     access_token: str,
-) -> List[RetrievedSkill]:
+) -> list[RetrievedSkill]:
     """
     Retrieve Level 3 (always-inject) skills.
     These are critical instincts that should always be considered.

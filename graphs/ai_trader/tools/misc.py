@@ -2,11 +2,12 @@
 
 import json
 from typing import Annotated
-from langchain_core.tools import tool, InjectedToolArg
+
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from langgraph.types import interrupt
 from qc_api import qc_request
-from supabase_client import SupabaseClient, get_qc_project_id, get_project_db_id
+from supabase_client import SupabaseClient, get_project_db_id, get_qc_project_id
 
 
 @tool

@@ -1,16 +1,15 @@
 """FastAPI server for the AI Trading Agent - No license required."""
 
-import os
 import json
-import asyncio
-from uuid import uuid4
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
+from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
 load_dotenv()
 

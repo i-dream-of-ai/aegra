@@ -14,24 +14,24 @@ Key features:
 - Fail open: Errors don't block the main agent
 """
 
-from typing import List, Dict, Any, Optional, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from typing import Any
 
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+
+from .planner import generate_retrieval_plan
+from .retriever import (
+    retrieve_always_skills,
+    retrieve_skills_by_embedding,
+    retrieve_skills_by_keywords,
+)
+from .synthesizer import synthesize_context
 from .types import (
-    SubconsciousState,
     SubconsciousEvent,
-    InjectionResult,
+    SubconsciousState,
     is_confirmation_message,
 )
-from .planner import generate_retrieval_plan, RetrievalPlan
-from .synthesizer import synthesize_context
-from .retriever import (
-    retrieve_skills_by_keywords,
-    retrieve_skills_by_embedding,
-    retrieve_always_skills,
-)
-
 
 # Minimum turns between injections to avoid spamming
 MIN_TURNS_BETWEEN_INJECTION = 2
@@ -49,7 +49,7 @@ class SubconsciousMiddleware:
             messages = [SystemMessage(content=system_prompt + context)] + messages[1:]
     """
 
-    on_event: Optional[Callable[[SubconsciousEvent], None]] = None
+    on_event: Callable[[SubconsciousEvent], None] | None = None
     state: SubconsciousState = None
 
     def __post_init__(self):
@@ -66,10 +66,10 @@ class SubconsciousMiddleware:
 
     async def process(
         self,
-        messages: List[BaseMessage],
+        messages: list[BaseMessage],
         access_token: str,
         current_turn: int = 0,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Process messages and return context to inject.
 
@@ -197,7 +197,7 @@ class SubconsciousMiddleware:
         turns_since_last = current_turn - self.state.last_injection_turn
         return turns_since_last >= MIN_TURNS_BETWEEN_INJECTION
 
-    def _get_last_human_message(self, messages: List[BaseMessage]) -> Optional[str]:
+    def _get_last_human_message(self, messages: list[BaseMessage]) -> str | None:
         """Extract the last human message content."""
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
@@ -214,7 +214,7 @@ class SubconsciousMiddleware:
         return None
 
     def _extract_context(
-        self, messages: List[BaseMessage], max_chars: int = 2000
+        self, messages: list[BaseMessage], max_chars: int = 2000
     ) -> str:
         """Extract conversation context for planning."""
         parts = []
@@ -244,7 +244,7 @@ class SubconsciousMiddleware:
 
         return "\n".join(parts)
 
-    def _messages_to_dicts(self, messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+    def _messages_to_dicts(self, messages: list[BaseMessage]) -> list[dict[str, Any]]:
         """Convert messages to dicts for planner."""
         result = []
         for msg in messages:
@@ -267,7 +267,7 @@ class SubconsciousMiddleware:
 
 
 def create_subconscious_middleware(
-    on_event: Optional[Callable[[SubconsciousEvent], None]] = None,
+    on_event: Callable[[SubconsciousEvent], None] | None = None,
 ) -> SubconsciousMiddleware:
     """
     Create a subconscious middleware instance.

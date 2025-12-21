@@ -6,12 +6,11 @@ for the main agent.
 """
 
 import json
-from typing import List, Optional
+
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from .types import RetrievedSkill, InjectionResult
-
+from .types import InjectionResult, RetrievedSkill
 
 # Synthesizer system prompt
 SYNTHESIZER_PROMPT = """You are a context synthesizer that prepares actionable guidance for a trading algorithm developer.
@@ -37,7 +36,7 @@ Guidelines:
 
 
 async def synthesize_context(
-    skills: List[RetrievedSkill],
+    skills: list[RetrievedSkill],
     user_intent: str,
     conversation_context: str,
     use_llm: bool = True,
@@ -79,7 +78,7 @@ async def synthesize_context(
         return _template_synthesis(skills)
 
 
-def _template_synthesis(skills: List[RetrievedSkill]) -> InjectionResult:
+def _template_synthesis(skills: list[RetrievedSkill]) -> InjectionResult:
     """Template-based synthesis for simple cases (no LLM call)."""
     # Sort by relevance
     sorted_skills = sorted(skills, key=lambda s: s.relevance_score, reverse=True)
@@ -102,7 +101,7 @@ def _template_synthesis(skills: List[RetrievedSkill]) -> InjectionResult:
 
 
 async def _llm_synthesis(
-    skills: List[RetrievedSkill],
+    skills: list[RetrievedSkill],
     user_intent: str,
     conversation_context: str,
 ) -> InjectionResult:
