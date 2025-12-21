@@ -37,6 +37,10 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
             },
         )
 
+        # Handle case where API returns a string instead of dict
+        if isinstance(result, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {result}"})
+
         backtest = result.get("backtest", {})
         if isinstance(backtest, list):
             backtest = backtest[0] if backtest else {}
@@ -50,6 +54,9 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
             "/backtests/read",
             {"projectId": qc_project_id, "backtestId": backtest_id},
         )
+
+        if isinstance(status_result, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {status_result}"})
 
         status_backtest = status_result.get("backtest", {})
         if isinstance(status_backtest, list):
@@ -99,6 +106,10 @@ async def read_backtest(backtest_id: str) -> str:
             "/backtests/read",
             {"projectId": qc_project_id, "backtestId": backtest_id},
         )
+
+        # Handle case where API returns a string instead of dict
+        if isinstance(result, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {result}"})
 
         backtest = result.get("backtest", {})
         if isinstance(backtest, list):
@@ -163,6 +174,9 @@ async def read_backtest_chart(
                 "count": 1,
             },
         )
+
+        if isinstance(data, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {data}"})
 
         chart_data = data.get("chart", data)
         series = chart_data.get("series", {})
@@ -230,6 +244,9 @@ async def read_backtest_orders(
                 "end": end,
             },
         )
+
+        if isinstance(data, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {data}"})
 
         orders = data.get("orders", [])
         total_orders = data.get("totalOrders", len(orders))
@@ -307,6 +324,9 @@ async def list_backtests(page: int = 1, page_size: int = 10) -> str:
             "/backtests/list",
             {"projectId": qc_project_id},
         )
+
+        if isinstance(result, str):
+            return json.dumps({"error": True, "message": f"Unexpected API response: {result}"})
 
         all_backtests = result.get("backtests", [])
         total = len(all_backtests)
