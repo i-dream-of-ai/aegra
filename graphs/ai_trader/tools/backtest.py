@@ -44,8 +44,10 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
         backtest = result.get("backtest", {})
         if isinstance(backtest, list):
             backtest = backtest[0] if backtest else {}
+        elif isinstance(backtest, str):
+            return json.dumps({"error": True, "message": f"Backtest error: {backtest}"})
 
-        backtest_id = backtest.get("backtestId")
+        backtest_id = backtest.get("backtestId") if isinstance(backtest, dict) else None
 
         # Wait briefly then check status
         await asyncio.sleep(5)
@@ -61,8 +63,10 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
         status_backtest = status_result.get("backtest", {})
         if isinstance(status_backtest, list):
             status_backtest = status_backtest[0] if status_backtest else {}
+        elif isinstance(status_backtest, str):
+            return json.dumps({"error": True, "message": f"Backtest status error: {status_backtest}"})
 
-        if status_backtest.get("error") or status_backtest.get("hasInitializeError"):
+        if isinstance(status_backtest, dict) and (status_backtest.get("error") or status_backtest.get("hasInitializeError")):
             error_msg = status_backtest.get("error", "Initialization error")
             return json.dumps(
                 {
@@ -114,8 +118,11 @@ async def read_backtest(backtest_id: str) -> str:
         backtest = result.get("backtest", {})
         if isinstance(backtest, list):
             backtest = backtest[0] if backtest else {}
+        elif isinstance(backtest, str):
+            # QC sometimes returns error messages as strings
+            return json.dumps({"error": True, "message": f"Backtest error: {backtest}"})
 
-        stats = backtest.get("statistics", {})
+        stats = backtest.get("statistics", {}) if isinstance(backtest, dict) else {}
 
         return json.dumps(
             {

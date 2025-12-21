@@ -993,6 +993,16 @@ async def execute_run_async(
             graph_context.setdefault("project_db_id", user_dict.get("project_db_id"))
             graph_context.setdefault("subconscious_enabled", True)
 
+        # Also extract qc_project_id from config metadata if present
+        # Frontend may send it in metadata rather than context
+        config_metadata = (config or {}).get("metadata", {})
+        if config_metadata.get("qc_project_id"):
+            graph_context.setdefault("qc_project_id", config_metadata["qc_project_id"])
+        # Also check configurable for backwards compatibility
+        configurable = (config or {}).get("configurable", {})
+        if configurable.get("qc_project_id"):
+            graph_context.setdefault("qc_project_id", configurable["qc_project_id"])
+
         # Handle human-in-the-loop fields
         if interrupt_before is not None:
             run_config["interrupt_before"] = (
