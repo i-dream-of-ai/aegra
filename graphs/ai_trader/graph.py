@@ -23,11 +23,11 @@ from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
 from ai_trader.context import Context
-from ai_trader.state import InputState, State
-from ai_trader.supabase_client import SupabaseClient
 
 # Import the reviewer subgraph
 from ai_trader.reviewer import reviewer_graph
+from ai_trader.state import InputState, State
+from ai_trader.supabase_client import SupabaseClient
 
 # Import all tools
 from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
@@ -238,7 +238,9 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
                 "budget_tokens": ctx.thinking_budget,
             }
             # Ensure max_tokens > thinking_budget
-            model_kwargs["max_tokens"] = max(base_max_tokens, ctx.thinking_budget + 4096)
+            model_kwargs["max_tokens"] = max(
+                base_max_tokens, ctx.thinking_budget + 4096
+            )
         else:
             model_kwargs["max_tokens"] = base_max_tokens
 

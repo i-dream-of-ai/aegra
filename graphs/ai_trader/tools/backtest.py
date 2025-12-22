@@ -85,7 +85,9 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to create backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to create backtest: {e!s}"}
+        )
 
 
 @tool
@@ -116,9 +118,15 @@ async def read_backtest(backtest_id: str) -> str:
         return json.dumps(
             {
                 "backtest_id": backtest_id,
-                "name": backtest.get("name", "Unknown") if isinstance(backtest, dict) else "Unknown",
-                "status": "Completed" if (isinstance(backtest, dict) and backtest.get("completed")) else "Running",
-                "completed": backtest.get("completed", False) if isinstance(backtest, dict) else False,
+                "name": backtest.get("name", "Unknown")
+                if isinstance(backtest, dict)
+                else "Unknown",
+                "status": "Completed"
+                if (isinstance(backtest, dict) and backtest.get("completed"))
+                else "Running",
+                "completed": backtest.get("completed", False)
+                if isinstance(backtest, dict)
+                else False,
                 "statistics": {
                     "net_profit": stats.get("Net Profit", "N/A"),
                     "cagr": stats.get("Compounding Annual Return", "N/A"),
@@ -126,11 +134,15 @@ async def read_backtest(backtest_id: str) -> str:
                     "max_drawdown": stats.get("Drawdown", "N/A"),
                     "win_rate": stats.get("Win Rate", "N/A"),
                     "total_trades": stats.get("Total Trades", "N/A"),
-                    "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
+                    "profit_factor": stats.get(
+                        "Profit-Loss Ratio", stats.get("Expectancy", "N/A")
+                    ),
                     "average_win": stats.get("Average Win", "N/A"),
                     "average_loss": stats.get("Average Loss", "N/A"),
                 },
-                "error": backtest.get("error") if isinstance(backtest, dict) and backtest.get("error") else None,
+                "error": backtest.get("error")
+                if isinstance(backtest, dict) and backtest.get("error")
+                else None,
             },
             indent=2,
         )
@@ -140,7 +152,9 @@ async def read_backtest(backtest_id: str) -> str:
 
 
 @tool
-async def read_backtest_chart(backtest_id: str, name: str, sample_count: int = 100) -> str:
+async def read_backtest_chart(
+    backtest_id: str, name: str, sample_count: int = 100
+) -> str:
     """
     Read chart data from a backtest. Returns metadata for frontend to display.
 
@@ -204,7 +218,9 @@ async def read_backtest_chart(backtest_id: str, name: str, sample_count: int = 1
 
 
 @tool
-async def read_backtest_orders(backtest_id: str, page: int = 1, page_size: int = 50) -> str:
+async def read_backtest_orders(
+    backtest_id: str, page: int = 1, page_size: int = 50
+) -> str:
     """
     Read paginated order history from a backtest.
 
@@ -256,7 +272,9 @@ async def read_backtest_orders(backtest_id: str, page: int = 1, page_size: int =
 
 
 @tool
-async def read_backtest_insights(backtest_id: str, start: int = 0, end: int = 100) -> str:
+async def read_backtest_insights(
+    backtest_id: str, start: int = 0, end: int = 100
+) -> str:
     """
     Read insights from a backtest.
 
@@ -346,7 +364,9 @@ async def list_backtests(page: int = 1, page_size: int = 10) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to list backtests: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to list backtests: {e!s}"}
+        )
 
 
 @tool
@@ -391,7 +411,9 @@ async def update_backtest(backtest_id: str, name: str = None, note: str = None) 
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to update backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to update backtest: {e!s}"}
+        )
 
 
 @tool
@@ -422,7 +444,9 @@ async def delete_backtest(backtest_id: str) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to delete backtest: {e!s}"})
+        return json.dumps(
+            {"error": True, "message": f"Failed to delete backtest: {e!s}"}
+        )
 
 
 # Export all tools
