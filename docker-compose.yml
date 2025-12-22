@@ -24,7 +24,6 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/aegra
       - AUTH_TYPE=custom
       - DEBUG=true
       - PORT=${PORT:-8000}
