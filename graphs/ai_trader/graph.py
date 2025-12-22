@@ -41,7 +41,9 @@ from ai_trader.context import Context
 from ai_trader.prompts import DEFAULT_MAIN_PROMPT
 
 # Import subconscious components
-from ai_trader.subconscious.middleware import SubconsciousMiddleware as SubconsciousProcessor
+from ai_trader.subconscious.middleware import (
+    SubconsciousMiddleware as SubconsciousProcessor,
+)
 from ai_trader.subconscious.types import SubconsciousEvent  # noqa: TC001
 
 # Import all tools
@@ -197,7 +199,9 @@ def dynamic_system_prompt(request: ModelRequest) -> str:
     # Append subconscious context if available
     subconscious_context = request.state.get("subconscious_context")
     if subconscious_context:
-        system_prompt += f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
+        system_prompt += (
+            f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
+        )
 
     return system_prompt
 
