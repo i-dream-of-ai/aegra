@@ -21,6 +21,7 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
     ModelFallbackMiddleware,
+    SummarizationMiddleware,
     TodoListMiddleware,
 )
 from langchain_anthropic import ChatAnthropic
@@ -445,15 +446,20 @@ graph = create_agent(
             "claude-sonnet-4-20250514",  # First fallback
             "gpt-4o",  # Cross-provider fallback
         ),
-        # 2. Todo list - task planning and tracking
+        # 2. Summarization - compress long conversations to fit context
+        SummarizationMiddleware(
+            model="gpt-4o-mini",  # Fast/cheap model for summarization
+            trigger={"tokens": 100000},  # Trigger when messages exceed 100k tokens
+        ),
+        # 3. Todo list - task planning and tracking
         TodoListMiddleware(),
-        # 3. Config fetcher - load project settings from DB
+        # 4. Config fetcher - load project settings from DB
         ConfigFetcherMiddleware(),
-        # 4. Subconscious - RAG + memory injection
+        # 5. Subconscious - RAG + memory injection
         SubconsciousMiddleware(),
-        # 5. Dangling tool repair - fix interrupted sessions
+        # 6. Dangling tool repair - fix interrupted sessions
         DanglingToolRepairMiddleware(),
-        # 6. Dynamic prompt - inject subconscious context
+        # 7. Dynamic prompt - inject subconscious context
         DynamicPromptMiddleware(),
     ],
     # Graph name for debugging
