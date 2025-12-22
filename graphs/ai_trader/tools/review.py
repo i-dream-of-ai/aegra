@@ -1,7 +1,7 @@
 """Code review tool - handoff to the Doubtful Deacon reviewer subgraph."""
 
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.tools import tool, ToolRuntime
+from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
 
