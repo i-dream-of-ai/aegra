@@ -418,6 +418,14 @@ def _process_stream_event(
 
     # Handle other stream modes
     elif mode in stream_mode:
+        # Filter out empty __interrupt__ arrays from values events
+        # The SDK incorrectly interprets __interrupt__: [] as a breakpoint interrupt
+        if mode == "values" and isinstance(chunk, dict) and "__interrupt__" in chunk:
+            interrupt_data = chunk.get("__interrupt__", [])
+            if not interrupt_data or len(interrupt_data) == 0:
+                # Remove empty __interrupt__ to prevent SDK misinterpretation
+                chunk = {k: v for k, v in chunk.items() if k != "__interrupt__"}
+
         if subgraphs and namespace:
             ns_str = (
                 "|".join(namespace)
