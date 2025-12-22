@@ -443,13 +443,14 @@ graph = create_agent(
     middleware=[
         # 1. Model fallback - automatic failover on errors
         ModelFallbackMiddleware(
-            "claude-sonnet-4-20250514",  # First fallback
-            "gpt-4o",  # Cross-provider fallback
+            "claude-sonnet-4-5-20250929",  # First fallback
+            "gpt-5",  # Cross-provider fallback
         ),
         # 2. Summarization - compress long conversations to fit context
         SummarizationMiddleware(
-            model="gpt-4o-mini",  # Fast/cheap model for summarization
+            model="gpt-5-mini",  # Fast/cheap model for summarization
             trigger={"tokens": 100000},  # Trigger when messages exceed 100k tokens
+            keep={"messages": 20},  # Keep last 20 messages intact
         ),
         # 3. Todo list - task planning and tracking
         TodoListMiddleware(),
