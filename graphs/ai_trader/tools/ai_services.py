@@ -33,7 +33,7 @@ async def check_initialization_errors(code: str) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/ai-services/check-initialization-errors",
+            "/ai/tools/backtest-init",
             {"projectId": qc_project_id, "code": code},
         )
         return json.dumps(data, indent=2)
@@ -59,7 +59,7 @@ async def complete_code(code: str, cursor_position: int) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/ai-services/complete-code",
+            "/ai/tools/complete",
             {
                 "projectId": qc_project_id,
                 "code": code,
@@ -89,7 +89,7 @@ async def enhance_error_message(error_message: str, code: str) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/ai-services/enhance-error",
+            "/ai/tools/error-enhance",
             {"projectId": qc_project_id, "errorMessage": error_message, "code": code},
         )
         return json.dumps(data, indent=2)
@@ -114,7 +114,7 @@ async def check_syntax(code: str) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/ai-services/check-syntax", {"projectId": qc_project_id, "code": code}
+            "/ai/tools/syntax-check", {"projectId": qc_project_id, "code": code}
         )
         return json.dumps(data, indent=2)
 
@@ -136,7 +136,7 @@ async def update_code_to_pep8(code: str) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/ai-services/pep8", {"projectId": qc_project_id, "code": code}
+            "/ai/tools/pep8-convert", {"projectId": qc_project_id, "code": code}
         )
         return json.dumps(data, indent=2)
 
@@ -159,8 +159,16 @@ async def search_quantconnect(query: str) -> str:
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
+        # Use QC's structured search format with criteria
         data = await qc_request(
-            "/ai-services/search", {"projectId": qc_project_id, "query": query}
+            "/ai/tools/search",
+            {
+                "language": "Py",
+                "criteria": [
+                    {"input": query, "type": "Docs", "count": 3},
+                    {"input": query, "type": "Examples", "count": 3},
+                ],
+            },
         )
         return json.dumps(data, indent=2)
 

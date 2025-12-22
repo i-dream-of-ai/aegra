@@ -4,7 +4,6 @@ import asyncio
 import json
 
 from langchain_core.tools import tool
-from langgraph.types import interrupt
 
 from ai_trader.qc_api import qc_request
 from ai_trader.supabase_client import SupabaseClient
