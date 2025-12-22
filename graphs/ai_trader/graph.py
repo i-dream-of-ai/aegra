@@ -105,7 +105,7 @@ def _get_default_model():
 
 
 @wrap_model_call
-def dynamic_model_middleware(request: ModelRequest, handler) -> ModelResponse:
+async def dynamic_model_middleware(request: ModelRequest, handler) -> ModelResponse:
     """
     Select and configure model based on runtime context.
 
@@ -123,7 +123,7 @@ def dynamic_model_middleware(request: ModelRequest, handler) -> ModelResponse:
     if not model_name:
         # Use default if not specified (shouldn't happen in production)
         logger.warning("No model in context, using default")
-        return handler(request)
+        return await handler(request)
 
     is_claude = model_name.startswith("claude")
 
@@ -167,7 +167,7 @@ def dynamic_model_middleware(request: ModelRequest, handler) -> ModelResponse:
         reasoning_effort=ctx.get("reasoning_effort"),
     )
 
-    return handler(request.override(model=model))
+    return await handler(request.override(model=model))
 
 
 # =============================================================================
