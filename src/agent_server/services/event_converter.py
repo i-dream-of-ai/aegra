@@ -52,6 +52,10 @@ class EventConverter:
             return create_end_event(event_id)
         elif event_type == "error":
             return create_error_event(data.get("error"), event_id)
+        elif event_type == "custom":
+            # Custom events (subconscious, etc.) - extract the data payload
+            custom_data = data.get("data", data)
+            return format_sse_message("custom", custom_data, event_id)
         else:
             # Handle all other event types generically (values, state, logs, tasks, etc.)
             # Extract payload - try common patterns

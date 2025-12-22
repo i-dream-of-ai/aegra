@@ -1,6 +1,7 @@
 """Streaming service for orchestrating SSE streaming"""
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -142,6 +143,14 @@ class StreamingService:
                 "values",
                 {"type": "execution_values", "chunk": event_payload},
             )
+        elif stream_mode_label == "custom":
+            # Store custom events for replay (subconscious events, etc.)
+            await store_sse_event(
+                run_id,
+                event_id,
+                "custom",
+                {"type": "custom_event", "data": event_payload},
+            )
         elif stream_mode_label == "end":
             await store_sse_event(
                 run_id,
@@ -222,6 +231,14 @@ class StreamingService:
             logger.error(f"Error in stream_run_execution for run {run_id}: {e}")
             yield create_error_event(str(e))
 
+    def _create_heartbeat(self) -> str:
+        """Create an SSE heartbeat comment to keep connection alive.
+
+        SSE comments (lines starting with ':') are ignored by clients but keep
+        the TCP connection alive, preventing timeouts from browsers, CDNs, or proxies.
+        """
+        return ": heartbeat\n\n"
+
     async def _replay_stored_events(
         self, run_id: str, last_event_id: str | None
     ) -> AsyncIterator[str]:
@@ -239,7 +256,11 @@ class StreamingService:
     async def _stream_live_events(
         self, run: Run, last_sent_sequence: int
     ) -> AsyncIterator[str]:
-        """Stream live events from broker"""
+        """Stream live events from broker with heartbeat keep-alive.
+
+        Sends periodic heartbeat comments to prevent SSE connection timeouts
+        during long operations (tool calls, backtests, etc.).
+        """
         run_id = run.run_id
         broker = broker_manager.get_or_create_broker(run_id)
 
@@ -247,18 +268,54 @@ class StreamingService:
         if run.status in ["success", "error", "interrupted"] and broker.is_finished():
             return
 
-        # Stream live events
-        if broker:
-            async for event_id, raw_event in broker.aiter():
-                # Skip duplicates that were already replayed
-                current_sequence = self._extract_event_sequence(event_id)
-                if current_sequence <= last_sent_sequence:
-                    continue
+        # Heartbeat interval in seconds (send every 15s to stay well under typical timeouts)
+        HEARTBEAT_INTERVAL = 15
+        last_heartbeat_time = time.monotonic()
 
-                sse_event = await self._convert_raw_to_sse(event_id, raw_event)
-                if sse_event:
-                    yield sse_event
-                    last_sent_sequence = current_sequence
+        # Stream live events with heartbeat
+        if broker:
+            while True:
+                try:
+                    # Use short timeout to check for events frequently
+                    event_id, raw_event = await asyncio.wait_for(
+                        broker.queue.get(), timeout=1.0
+                    )
+
+                    # Check for end event
+                    if (
+                        isinstance(raw_event, tuple)
+                        and len(raw_event) >= 1
+                        and raw_event[0] == "end"
+                    ):
+                        # Convert and yield the end event, then break
+                        sse_event = await self._convert_raw_to_sse(event_id, raw_event)
+                        if sse_event:
+                            yield sse_event
+                        break
+
+                    # Skip duplicates that were already replayed
+                    current_sequence = self._extract_event_sequence(event_id)
+                    if current_sequence <= last_sent_sequence:
+                        continue
+
+                    sse_event = await self._convert_raw_to_sse(event_id, raw_event)
+                    if sse_event:
+                        yield sse_event
+                        last_sent_sequence = current_sequence
+                        # Reset heartbeat timer on successful event
+                        last_heartbeat_time = time.monotonic()
+
+                except TimeoutError:
+                    # No event received within timeout, check if we need heartbeat
+                    current_time = time.monotonic()
+                    if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                        yield self._create_heartbeat()
+                        last_heartbeat_time = current_time
+
+                    # Check if run is finished and queue is empty
+                    if broker.is_finished() and broker.queue.empty():
+                        break
+                    continue
 
     def _cancel_background_task(self, run_id: str):
         """Cancel background task on disconnect"""
