@@ -68,6 +68,7 @@ class SupabaseClient:
 
     def __init__(self, use_service_role: bool = False):
         self.supabase_url, self.service_role_key = get_supabase_config()
+        self.use_service_role = use_service_role
 
         # Use user token for RLS, or service role for public access
         if use_service_role:
@@ -83,9 +84,11 @@ class SupabaseClient:
 
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
+        # When using service role, both Authorization and apikey must use service role key
+        apikey = self.service_role_key if self.use_service_role else (self.anon_key or self.service_role_key)
         return {
             "Authorization": f"Bearer {self.token}",
-            "apikey": self.anon_key or self.service_role_key,
+            "apikey": apikey,
             "Content-Type": "application/json",
         }
 
