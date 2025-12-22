@@ -385,7 +385,7 @@ def create_dynamic_model(_state: AITraderState, runtime: Runtime[Context]):
     ctx = runtime.context
 
     model_name = ctx.model or os.environ.get(
-        "ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
+        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
     )
 
     is_claude = model_name.startswith("claude")
