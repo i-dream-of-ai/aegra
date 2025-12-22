@@ -11,6 +11,7 @@ It uses the standard StateGraph pattern from LangGraph with:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Literal
 
@@ -21,12 +22,17 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
+from langgraph.types import dispatch_custom_event
 
 from ai_trader.context import Context
 
 # Import the reviewer subgraph
 from ai_trader.reviewer import reviewer_graph
 from ai_trader.state import InputState, State
+
+# Import subconscious components
+from ai_trader.subconscious.middleware import SubconsciousMiddleware
+from ai_trader.subconscious.types import SubconsciousEvent  # noqa: TC001
 from ai_trader.supabase_client import SupabaseClient
 
 # Import all tools
@@ -156,10 +162,14 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
     """
     Subconscious injection - retrieves relevant skills and behaviors.
 
-    This node runs before the main agent to inject context from:
+    This node runs ONCE at the start of each run to inject context from:
     - Agent memories (long-term storage)
     - Algorithm knowledge base (RAG search)
     - User preferences and past interactions
+
+    Emits SSE events for UI progress indicator:
+    - subconscious_thinking: {stage: "planning"|"retrieving"|"synthesizing"|"done"}
+    - instinct_injection: {skillIds, tokenCount, driftScore, synthesisMethod}
     """
     ctx = runtime.context
 
@@ -167,34 +177,45 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         logger.debug("Subconscious disabled, skipping")
         return {}
 
+    # Get access token for DB queries
+    access_token = ctx.access_token
+    if not access_token:
+        logger.debug("No access token, skipping subconscious")
+        return {}
+
     try:
-        logger.debug("Subconscious: planning")
+        # Create middleware with event dispatcher
+        def emit_event(event: SubconsciousEvent):
+            """Dispatch event to LangGraph stream."""
+            dispatch_custom_event(
+                event.type,
+                {"stage": event.stage, **(event.data or {})},
+            )
 
-        # Get the last user message for context
-        last_message = None
-        for msg in reversed(state.messages):
-            if hasattr(msg, "type") and msg.type == "human":
-                last_message = msg.content if hasattr(msg, "content") else str(msg)
-                break
+        middleware = SubconsciousMiddleware(on_event=emit_event)
 
-        if not last_message:
-            return {}
+        # Process messages and get context to inject
+        # current_turn=0 ensures it always runs (rate limiting is per-run, not per-turn)
+        injected_context = await middleware.process(
+            messages=list(state.messages),
+            access_token=access_token,
+            current_turn=0,
+        )
 
-        # TODO: Implement actual subconscious retrieval
-        # For now, this is a placeholder that will be filled with:
-        # 1. Memory retrieval from agent_memories table
-        # 2. RAG search over algorithm_knowledge_base
-        # 3. Skill injection based on conversation context
+        if injected_context:
+            logger.info(
+                "Subconscious injected context",
+                token_count=len(injected_context.split()),
+            )
+            return {"subconscious_context": injected_context}
 
-        logger.debug("Subconscious: done")
-
-        # Return any injected context as a system message
-        # For now, return empty - the full implementation would return:
-        # return {"subconscious_context": "Retrieved context here..."}
         return {}
 
     except Exception as e:
         logger.warning("Subconscious injection failed", error=str(e))
+        # Emit done event even on failure so UI doesn't hang
+        with contextlib.suppress(Exception):
+            dispatch_custom_event("subconscious_thinking", {"stage": "done"})
         return {}
 
 
