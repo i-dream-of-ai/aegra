@@ -330,34 +330,40 @@ class SubconsciousMiddleware(AgentMiddleware[AITraderState]):
 class DynamicPromptMiddleware(AgentMiddleware[AITraderState]):
     """
     Injects subconscious context into the system prompt before model calls.
+
+    Uses wrap_model_call to access state and modify the system message with
+    injected context from the SubconsciousMiddleware.
     """
 
     state_schema = AITraderState
 
-    def before_model(
-        self, state: AITraderState, _runtime: Runtime[Context]
-    ) -> dict[str, Any] | None:
-        """Append subconscious context to system prompt."""
-        subconscious_context = state.get("subconscious_context")
-        if not subconscious_context:
-            return None
-
-        # The system prompt will be modified by wrap_model_call instead
-        # This hook just logs that context is available
-        logger.debug("Subconscious context available for injection")
-        return None
-
-    def wrap_model_call(self, request, handler):
+    def wrap_model_call(
+        self,
+        request,  # ModelRequest
+        handler,  # Callable[[ModelRequest], ModelResponse]
+    ):
         """Wrap model call to inject subconscious context into system message."""
-        subconscious_context = getattr(request, "_subconscious_context", None)
+        # Access subconscious_context from state (set by SubconsciousMiddleware)
+        subconscious_context = request.state.get("subconscious_context")
 
-        if subconscious_context and request.systemMessage:
-            # Append context to system message
-            request = request.override(
-                systemMessage=request.systemMessage.concat(
-                    f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
-                )
+        if subconscious_context and request.system_message:
+            logger.debug(
+                "Injecting subconscious context into system prompt",
+                context_length=len(subconscious_context),
             )
+            # Build the context addendum
+            context_addendum = (
+                f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
+            )
+
+            # Append to system message content blocks
+            from langchain_core.messages import SystemMessage
+
+            new_content = list(request.system_message.content_blocks) + [
+                {"type": "text", "text": context_addendum}
+            ]
+            new_system_message = SystemMessage(content=new_content)
+            request = request.override(system_message=new_system_message)
 
         return handler(request)
 
