@@ -21,6 +21,8 @@ services:
       dockerfile: deployments/docker/Dockerfile
     ports:
       - "${PORT:-8000}:${PORT:-8000}"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/aegra
       - AUTH_TYPE=custom
@@ -34,7 +36,6 @@ services:
       - ./graphs:/app/graphs:ro
       - ./src:/app/src:ro # for hot reload support of server
       - ./auth.py:/app/auth.py:ro
-      - ./.env:/app/.env:ro
       - ./alembic:/app/alembic:ro # for migrations
       # Mount custom route files dynamically (add your custom routes file here)
       - ./custom_routes_example.py:/app/custom_routes_example.py:ro
