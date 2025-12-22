@@ -16,11 +16,13 @@ _serializer = GeneralSerializer()
 def get_sse_headers() -> dict[str, str]:
     """Get standard SSE headers"""
     return {
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "Content-Type": "text/event-stream",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Last-Event-ID",
+        # Prevent buffering by nginx and other reverse proxies
+        "X-Accel-Buffering": "no",
     }
 
 
