@@ -2,11 +2,13 @@
 
 import asyncio
 import contextlib
+import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -44,6 +46,100 @@ active_runs: dict[str, asyncio.Task] = {}
 
 # Default stream modes for background run execution
 DEFAULT_STREAM_MODES = ["values"]
+
+
+# =============================================================================
+# Project Config Fetching (for AI Trader agent)
+# =============================================================================
+
+
+async def fetch_project_config(project_db_id: str) -> dict[str, Any]:
+    """Fetch project AI config from Supabase.
+
+    Loads project's AI settings from the projects table, including:
+    - ai_model, thinking_budget, reasoning_effort, text_verbosity
+    - agent_config JSONB (per-agent overrides like systemPrompt)
+
+    Returns a dict with config values to be passed as graph context.
+    """
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get(
+        "NEXT_PUBLIC_SUPABASE_URL"
+    )
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+    if not supabase_url or not supabase_key:
+        logger.warning("Supabase not configured, skipping project config fetch")
+        return {}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{supabase_url}/rest/v1/projects",
+                params={
+                    "select": "id,ai_model,thinking_budget,reasoning_effort,text_verbosity,max_output_tokens,agent_config",
+                    "id": f"eq.{project_db_id}",
+                    "limit": "1",
+                },
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}",
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            projects = response.json()
+
+        if not projects:
+            logger.warning("Project not found", project_db_id=project_db_id)
+            return {}
+
+        project = projects[0]
+        agent_config = project.get("agent_config") or {}
+        main_config = agent_config.get("main", {})
+
+        # Build config dict - JSONB overrides project-level fields
+        config = {
+            "model": main_config.get("model") or project.get("ai_model"),
+            "thinking_budget": (
+                main_config.get("thinkingBudget")
+                if main_config.get("thinkingBudget") is not None
+                else project.get("thinking_budget")
+            ),
+            "reasoning_effort": (
+                main_config.get("reasoningEffort") or project.get("reasoning_effort")
+            ),
+            "verbosity": main_config.get("verbosity") or project.get("text_verbosity"),
+        }
+
+        # System prompt from JSONB (optional override)
+        if main_config.get("systemPrompt"):
+            config["system_prompt"] = main_config["systemPrompt"]
+
+        # Subconscious feature flag
+        if main_config.get("subconsciousEnabled") is False:
+            config["subconscious_enabled"] = False
+
+        # Reviewer config from agent_config JSONB
+        reviewer_config = agent_config.get("reviewer", {})
+        if reviewer_config:
+            config["reviewer_model"] = reviewer_config.get("model")
+            config["reviewer_thinking_budget"] = reviewer_config.get("thinkingBudget")
+            config["reviewer_reasoning_effort"] = reviewer_config.get("reasoningEffort")
+            if reviewer_config.get("systemPrompt"):
+                config["reviewer_prompt"] = reviewer_config["systemPrompt"]
+
+        logger.info(
+            "Loaded project config from DB",
+            project_id=project_db_id,
+            model=config.get("model"),
+            thinking_budget=config.get("thinking_budget"),
+        )
+
+        return config
+
+    except Exception as e:
+        logger.warning("Failed to fetch project config", error=str(e))
+        return {}
 
 
 def map_command_to_langgraph(cmd: dict[str, Any]) -> Command:
@@ -1027,27 +1123,40 @@ async def execute_run_async(
             run_id, thread_id, user, config or {}, checkpoint
         )
 
-        # Build graph context from user auth data
+        # Build graph context from user auth data and request metadata
         # This context is passed to graph.astream() and accessible via request.runtime.context
-        # in middleware (matches AgentContext dataclass in graph.py)
+        # in middleware (used by dynamic_model_middleware and dynamic_system_prompt)
         graph_context = context.copy() if context else {}
         if user:
             user_dict = user.to_dict() if hasattr(user, "to_dict") else {}
-            # Extract auth fields for AgentContext
+            # Extract auth fields for context
             graph_context.setdefault("access_token", user_dict.get("access_token"))
             graph_context.setdefault("user_id", user.identity)
-            graph_context.setdefault("project_db_id", user_dict.get("project_db_id"))
             graph_context.setdefault("subconscious_enabled", True)
 
-        # Also extract qc_project_id from config metadata if present
-        # Frontend may send it in metadata rather than context
+        # Extract project IDs from config metadata (sent by frontend)
+        # Frontend sends: metadata: { project_id: "uuid", qc_project_id: 123 }
         config_metadata = (config or {}).get("metadata", {})
+        if config_metadata.get("project_id"):
+            graph_context.setdefault("project_db_id", config_metadata["project_id"])
         if config_metadata.get("qc_project_id"):
             graph_context.setdefault("qc_project_id", config_metadata["qc_project_id"])
         # Also check configurable for backwards compatibility
         configurable = (config or {}).get("configurable", {})
+        if configurable.get("project_id"):
+            graph_context.setdefault("project_db_id", configurable["project_id"])
         if configurable.get("qc_project_id"):
             graph_context.setdefault("qc_project_id", configurable["qc_project_id"])
+
+        # Fetch project config from DB (model, prompts, thinking_budget, etc.)
+        # This is used by dynamic_model_middleware and dynamic_system_prompt
+        project_db_id = graph_context.get("project_db_id")
+        if project_db_id:
+            project_config = await fetch_project_config(project_db_id)
+            # Merge project config into graph context (don't override explicit values)
+            for key, value in project_config.items():
+                if value is not None:
+                    graph_context.setdefault(key, value)
 
         # Handle human-in-the-loop fields
         if interrupt_before is not None:

@@ -2,11 +2,12 @@
 AI Trader Agent - LangChain create_agent Implementation
 
 This graph uses the LangChain create_agent pattern with middleware for:
+- Dynamic model selection (based on runtime context from DB)
+- Dynamic system prompt (based on runtime context from DB)
 - Model fallback (automatic failover on errors)
 - Todo list (task planning and tracking)
 - Dangling tool call repair (fix interrupted sessions)
 - Subconscious injection (dynamic skill/behavior loading)
-- Config fetching (load project settings from DB)
 """
 
 from __future__ import annotations
@@ -21,8 +22,12 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
     ModelFallbackMiddleware,
+    ModelRequest,
+    ModelResponse,
     SummarizationMiddleware,
     TodoListMiddleware,
+    dynamic_prompt,
+    wrap_model_call,
 )
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import ToolMessage
@@ -31,11 +36,11 @@ from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from ai_trader.context import Context
+from ai_trader.prompts import DEFAULT_MAIN_PROMPT
 
 # Import subconscious components
 from ai_trader.subconscious.middleware import SubconsciousMiddleware as SubconsciousProcessor
 from ai_trader.subconscious.types import SubconsciousEvent  # noqa: TC001
-from ai_trader.supabase_client import SupabaseClient
 
 # Import all tools
 from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
@@ -74,6 +79,125 @@ class AITraderState(AgentState):
 
     # Subconscious injection context (populated by SubconsciousMiddleware)
     subconscious_context: str | None = None
+
+
+# =============================================================================
+# Default Model (required by create_agent, overridden by middleware)
+# =============================================================================
+
+
+def _get_default_model():
+    """Get default model lazily to avoid import-time API key requirement.
+
+    This is the fallback model if context doesn't specify one.
+    In practice, context should always have model from DB.
+    """
+    return ChatOpenAI(
+        model="gpt-5",
+        max_tokens=8192,
+        api_key=os.environ.get("OPENAI_API_KEY", "placeholder"),
+    )
+
+
+# =============================================================================
+# Middleware: Dynamic Model Selection
+# =============================================================================
+
+
+@wrap_model_call
+def dynamic_model_middleware(request: ModelRequest, handler) -> ModelResponse:
+    """
+    Select and configure model based on runtime context.
+
+    Context is passed at invocation time from runs.py, which fetches
+    config from the DB before invoking the agent.
+
+    Supports:
+    - Claude models with extended thinking
+    - OpenAI models with reasoning effort
+    """
+    ctx = request.runtime.context
+
+    # Get model from context (loaded from DB by runs.py)
+    model_name = ctx.get("model")
+    if not model_name:
+        # Use default if not specified (shouldn't happen in production)
+        logger.warning("No model in context, using default")
+        return handler(request)
+
+    is_claude = model_name.startswith("claude")
+
+    if is_claude:
+        base_max_tokens = 8192
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+        }
+
+        # thinking_budget from context (loaded from DB)
+        thinking_budget = ctx.get("thinking_budget") or 0
+        if thinking_budget > 0:
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_budget,
+            }
+            model_kwargs["max_tokens"] = max(base_max_tokens, thinking_budget + 4096)
+        else:
+            model_kwargs["max_tokens"] = base_max_tokens
+
+        model = ChatAnthropic(**model_kwargs)
+    else:
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("OPENAI_API_KEY"),
+            "max_tokens": 8192,
+        }
+
+        # reasoning_effort from context (loaded from DB)
+        reasoning_effort = ctx.get("reasoning_effort")
+        if reasoning_effort and reasoning_effort != "none":
+            model_kwargs["reasoning_effort"] = reasoning_effort
+
+        model = ChatOpenAI(**model_kwargs)
+
+    logger.info(
+        "Dynamic model selected",
+        model=model_name,
+        thinking_budget=ctx.get("thinking_budget"),
+        reasoning_effort=ctx.get("reasoning_effort"),
+    )
+
+    return handler(request.override(model=model))
+
+
+# =============================================================================
+# Middleware: Dynamic System Prompt
+# =============================================================================
+
+
+@dynamic_prompt
+def dynamic_system_prompt(request: ModelRequest) -> str:
+    """
+    Generate system prompt based on runtime context.
+
+    Context is passed at invocation time from runs.py, which fetches
+    config from the DB before invoking the agent.
+    """
+    ctx = request.runtime.context
+
+    # Get system prompt from context (loaded from DB by runs.py)
+    system_prompt = ctx.get("system_prompt")
+    if not system_prompt:
+        # Use default from local prompt files
+        logger.debug("No system prompt in context, using default")
+        system_prompt = DEFAULT_MAIN_PROMPT
+
+    # Append subconscious context if available
+    subconscious_context = request.state.get("subconscious_context")
+    if subconscious_context:
+        system_prompt += f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
+
+    return system_prompt
 
 
 # =============================================================================
@@ -160,103 +284,6 @@ class DanglingToolRepairMiddleware(AgentMiddleware[AITraderState]):
 
 
 # =============================================================================
-# Middleware: Config Fetcher (loads project settings from DB)
-# =============================================================================
-
-
-class ConfigFetcherMiddleware(AgentMiddleware[AITraderState]):
-    """
-    Fetches agent configuration from the database at the start of each run.
-
-    Loads project's AI settings from the projects table, including:
-    - model, thinking_budget, reasoning_effort
-    - agent_config JSONB (per-agent overrides)
-    """
-
-    state_schema = AITraderState
-
-    async def abefore_agent(
-        self, _state: AITraderState, runtime: Runtime[Context]
-    ) -> dict[str, Any] | None:
-        """Fetch config from DB and update runtime context."""
-        ctx = runtime.context
-
-        if not ctx.project_db_id:
-            logger.info("No project_db_id in context, using default config")
-            return None
-
-        try:
-            client = SupabaseClient(use_service_role=True)
-
-            projects = await client.select(
-                "projects",
-                {
-                    "select": "id,ai_model,thinking_budget,reasoning_effort,text_verbosity,max_output_tokens,agent_config",
-                    "id": f"eq.{ctx.project_db_id}",
-                    "limit": "1",
-                },
-            )
-
-            if not projects:
-                logger.warning("Project not found", project_db_id=ctx.project_db_id)
-                return None
-
-            project = projects[0]
-            agent_config = project.get("agent_config") or {}
-            main_config = agent_config.get("main", {})
-
-            # Apply main agent settings (JSONB overrides project-level)
-            if main_config.get("model"):
-                ctx.model = main_config["model"]
-            elif project.get("ai_model"):
-                ctx.model = project["ai_model"]
-
-            if main_config.get("thinkingBudget") is not None:
-                ctx.thinking_budget = main_config["thinkingBudget"]
-            elif project.get("thinking_budget") is not None:
-                ctx.thinking_budget = project["thinking_budget"]
-
-            if main_config.get("verbosity"):
-                ctx.verbosity = main_config["verbosity"]
-            elif project.get("text_verbosity"):
-                ctx.verbosity = project["text_verbosity"]
-
-            if main_config.get("reasoningEffort"):
-                ctx.reasoning_effort = main_config["reasoningEffort"]
-            elif project.get("reasoning_effort"):
-                ctx.reasoning_effort = project["reasoning_effort"]
-
-            if main_config.get("systemPrompt"):
-                ctx.system_prompt = main_config["systemPrompt"]
-
-            if main_config.get("subconsciousEnabled") is False:
-                ctx.subconscious_enabled = False
-
-            # Reviewer config
-            reviewer_config = agent_config.get("reviewer", {})
-            if reviewer_config.get("model"):
-                ctx.reviewer_model = reviewer_config["model"]
-            if reviewer_config.get("thinkingBudget") is not None:
-                ctx.reviewer_thinking_budget = reviewer_config["thinkingBudget"]
-            if reviewer_config.get("reasoningEffort"):
-                ctx.reviewer_reasoning_effort = reviewer_config["reasoningEffort"]
-            if reviewer_config.get("systemPrompt"):
-                ctx.reviewer_prompt = reviewer_config["systemPrompt"]
-
-            logger.info(
-                "Loaded project config",
-                project_id=ctx.project_db_id,
-                model=ctx.model,
-                thinking_budget=ctx.thinking_budget,
-            )
-
-        except Exception as e:
-            logger.warning("Failed to fetch agent config", error=str(e))
-
-        return None
-
-
-# =============================================================================
 # Middleware: Subconscious Injection (RAG + Memory)
 # =============================================================================
 
@@ -281,11 +308,11 @@ class SubconsciousMiddleware(AgentMiddleware[AITraderState]):
         """Inject subconscious context before agent runs."""
         ctx = runtime.context
 
-        if not ctx.subconscious_enabled:
+        if not ctx.get("subconscious_enabled", True):
             logger.debug("Subconscious disabled, skipping")
             return None
 
-        access_token = ctx.access_token
+        access_token = ctx.get("access_token")
         if not access_token:
             logger.debug("No access token, skipping subconscious")
             return None
@@ -324,128 +351,14 @@ class SubconsciousMiddleware(AgentMiddleware[AITraderState]):
 
 
 # =============================================================================
-# Middleware: Dynamic System Prompt (injects subconscious context)
-# =============================================================================
-
-
-class DynamicPromptMiddleware(AgentMiddleware[AITraderState]):
-    """
-    Injects subconscious context into the system prompt before model calls.
-
-    Uses awrap_model_call (async) to access state and modify the system message
-    with injected context from the SubconsciousMiddleware.
-    """
-
-    state_schema = AITraderState
-
-    async def awrap_model_call(
-        self,
-        request,  # ModelRequest
-        handler,  # Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ):
-        """Async wrap model call to inject subconscious context into system message."""
-        # Access subconscious_context from state (set by SubconsciousMiddleware)
-        subconscious_context = request.state.get("subconscious_context")
-
-        if subconscious_context and request.system_message:
-            logger.debug(
-                "Injecting subconscious context into system prompt",
-                context_length=len(subconscious_context),
-            )
-            # Build the context addendum
-            context_addendum = (
-                f"\n\n<injected_context>\n{subconscious_context}\n</injected_context>"
-            )
-
-            # Append to system message content blocks
-            from langchain_core.messages import SystemMessage
-
-            new_content = list(request.system_message.content_blocks) + [
-                {"type": "text", "text": context_addendum}
-            ]
-            new_system_message = SystemMessage(content=new_content)
-            request = request.override(system_message=new_system_message)
-
-        return await handler(request)
-
-
-# =============================================================================
-# Dynamic Model Selection (with extended thinking support)
-# =============================================================================
-
-
-def create_dynamic_model(_state: AITraderState, runtime: Runtime[Context]):
-    """
-    Dynamically select and configure the model based on runtime context.
-
-    Supports:
-    - Claude models with extended thinking
-    - OpenAI models with reasoning effort
-    """
-    ctx = runtime.context
-
-    model_name = ctx.model or os.environ.get(
-        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
-    )
-
-    is_claude = model_name.startswith("claude")
-
-    if is_claude:
-        base_max_tokens = 8192
-        model_kwargs = {
-            "model": model_name,
-            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-        }
-
-        if ctx.thinking_budget > 0:
-            model_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": ctx.thinking_budget,
-            }
-            model_kwargs["max_tokens"] = max(base_max_tokens, ctx.thinking_budget + 4096)
-        else:
-            model_kwargs["max_tokens"] = base_max_tokens
-
-        model = ChatAnthropic(**model_kwargs)
-    else:
-        model_kwargs = {
-            "model": model_name,
-            "api_key": os.environ.get("OPENAI_API_KEY"),
-            "max_tokens": 8192,
-        }
-
-        if ctx.reasoning_effort and ctx.reasoning_effort != "none":
-            model_kwargs["reasoning_effort"] = ctx.reasoning_effort
-
-        model = ChatOpenAI(**model_kwargs)
-
-    # Bind tools to the model
-    return model.bind_tools(ALL_TOOLS)
-
-
-# =============================================================================
-# Dynamic System Prompt Selection
-# =============================================================================
-
-
-def get_system_prompt(_state: AITraderState, runtime: Runtime[Context]) -> str:
-    """Get system prompt from runtime context (loaded from DB by ConfigFetcherMiddleware)."""
-    return runtime.context.system_prompt
-
-
-# =============================================================================
 # Create the Agent
 # =============================================================================
 
 graph = create_agent(
-    # Dynamic model selection based on runtime context
-    model=create_dynamic_model,
+    # Default model (overridden by dynamic_model_middleware based on context)
+    model=_get_default_model(),
     # All available tools
     tools=ALL_TOOLS,
-    # Dynamic system prompt from DB config
-    system_prompt=get_system_prompt,
-    # Context schema for runtime configuration
-    context_schema=Context,
     # Middleware stack (executed in order)
     middleware=[
         # 1. Model fallback - automatic failover on errors
@@ -456,20 +369,22 @@ graph = create_agent(
         # 2. Summarization - compress long conversations to fit context
         SummarizationMiddleware(
             model="gpt-5-mini",  # Fast/cheap model for summarization
-            trigger={"tokens": 100000},  # Trigger when messages exceed 100k tokens
-            keep={"messages": 20},  # Keep last 20 messages intact
+            trigger=("tokens", 100000),  # Trigger when messages exceed 100k tokens
+            keep=("messages", 20),  # Keep last 20 messages intact
         ),
         # 3. Todo list - task planning and tracking
         TodoListMiddleware(),
-        # 4. Config fetcher - load project settings from DB
-        ConfigFetcherMiddleware(),
-        # 5. Subconscious - RAG + memory injection
+        # 4. Subconscious - RAG + memory injection (runs before model selection)
         SubconsciousMiddleware(),
-        # 6. Dangling tool repair - fix interrupted sessions
+        # 5. Dangling tool repair - fix interrupted sessions
         DanglingToolRepairMiddleware(),
-        # 7. Dynamic prompt - inject subconscious context
-        DynamicPromptMiddleware(),
+        # 6. Dynamic model - select model based on context from DB
+        dynamic_model_middleware,
+        # 7. Dynamic prompt - set system prompt from context + inject subconscious
+        dynamic_system_prompt,
     ],
+    # Context schema for runtime configuration (passed at invocation)
+    context_schema=Context,
     # Graph name for debugging
     name="Shooby Dooby",
 )
