@@ -331,18 +331,18 @@ class DynamicPromptMiddleware(AgentMiddleware[AITraderState]):
     """
     Injects subconscious context into the system prompt before model calls.
 
-    Uses wrap_model_call to access state and modify the system message with
-    injected context from the SubconsciousMiddleware.
+    Uses awrap_model_call (async) to access state and modify the system message
+    with injected context from the SubconsciousMiddleware.
     """
 
     state_schema = AITraderState
 
-    def wrap_model_call(
+    async def awrap_model_call(
         self,
         request,  # ModelRequest
-        handler,  # Callable[[ModelRequest], ModelResponse]
+        handler,  # Callable[[ModelRequest], Awaitable[ModelResponse]]
     ):
-        """Wrap model call to inject subconscious context into system message."""
+        """Async wrap model call to inject subconscious context into system message."""
         # Access subconscious_context from state (set by SubconsciousMiddleware)
         subconscious_context = request.state.get("subconscious_context")
 
@@ -365,7 +365,7 @@ class DynamicPromptMiddleware(AgentMiddleware[AITraderState]):
             new_system_message = SystemMessage(content=new_content)
             request = request.override(system_message=new_system_message)
 
-        return handler(request)
+        return await handler(request)
 
 
 # =============================================================================
