@@ -153,6 +153,12 @@ class EventConverter:
                 payload, event_type=event_type, event_id=event_id
             )
         elif stream_mode == "values" or event_type.startswith("values"):
+            # Filter out empty __interrupt__ arrays from values events
+            # The SDK incorrectly interprets __interrupt__: [] as a breakpoint interrupt
+            if isinstance(payload, dict) and "__interrupt__" in payload:
+                interrupt_data = payload.get("__interrupt__", [])
+                if not interrupt_data or len(interrupt_data) == 0:
+                    payload = {k: v for k, v in payload.items() if k != "__interrupt__"}
             # For values events, use format_sse_message directly to support namespaces
             return format_sse_message(event_type, payload, event_id)
         elif stream_mode == "debug":
