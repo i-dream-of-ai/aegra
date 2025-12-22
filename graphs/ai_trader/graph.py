@@ -26,6 +26,9 @@ from ai_trader.context import Context
 from ai_trader.state import InputState, State
 from ai_trader.supabase_client import SupabaseClient
 
+# Import the reviewer subgraph
+from ai_trader.reviewer import reviewer_graph
+
 # Import all tools
 from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
 from ai_trader.tools.backtest import TOOLS as BACKTEST_TOOLS
@@ -306,6 +309,7 @@ builder.add_node("fetch_config", fetch_agent_config)
 builder.add_node("subconscious", subconscious_node)
 builder.add_node("call_model", call_model)
 builder.add_node("tools", ToolNode(ALL_TOOLS))
+builder.add_node("reviewer", reviewer_graph)  # Doubtful Deacon subgraph
 
 # Add edges
 builder.add_edge("__start__", "fetch_config")
@@ -313,6 +317,7 @@ builder.add_edge("fetch_config", "subconscious")
 builder.add_edge("subconscious", "call_model")
 builder.add_conditional_edges("call_model", route_after_model)
 builder.add_edge("tools", "call_model")
+builder.add_edge("reviewer", "call_model")  # After review, main agent responds
 
 # Compile the graph
 graph = builder.compile(name="Shooby Dooby")
