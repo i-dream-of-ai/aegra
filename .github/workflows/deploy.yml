@@ -17,7 +17,6 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
             cd /opt/aegra-core
-            git stash --include-untracked
             git pull origin main
             docker compose build --no-cache aegra
             docker compose up -d aegra
