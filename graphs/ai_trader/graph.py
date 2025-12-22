@@ -299,12 +299,65 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         return {}
 
 
+def create_model_with_tools(
+    model_name: str,
+    thinking_budget: int = 0,
+    reasoning_effort: str | None = None,
+) -> tuple:
+    """
+    Create a model instance with tools bound.
+
+    Returns (model_with_tools, is_claude) tuple.
+    """
+    is_claude = model_name.startswith("claude")
+
+    if is_claude:
+        base_max_tokens = 8192
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+        }
+
+        if thinking_budget > 0:
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_budget,
+            }
+            model_kwargs["max_tokens"] = max(base_max_tokens, thinking_budget + 4096)
+        else:
+            model_kwargs["max_tokens"] = base_max_tokens
+
+        model = ChatAnthropic(**model_kwargs)
+    else:
+        model_kwargs = {
+            "model": model_name,
+            "api_key": os.environ.get("OPENAI_API_KEY"),
+            "max_tokens": 8192,
+        }
+
+        if reasoning_effort and reasoning_effort != "none":
+            model_kwargs["reasoning_effort"] = reasoning_effort
+
+        model = ChatOpenAI(**model_kwargs)
+
+    return model.bind_tools(ALL_TOOLS), is_claude
+
+
+# Default fallback chain: if primary fails, try these in order
+# Claude Sonnet is fast and capable, GPT-4o is a good cross-provider fallback
+DEFAULT_FALLBACK_MODELS = [
+    "claude-sonnet-4-20250514",
+    "gpt-4o",
+]
+
+
 async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
     """
     Main agent node - invokes the LLM with tools.
 
     Uses the system prompt from context and all available tools.
     Handles extended thinking if configured.
+    Implements model fallback: if primary model fails, tries fallback models.
     """
     ctx = runtime.context
 
@@ -315,60 +368,85 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
             f"\n\n<injected_context>\n{state.subconscious_context}\n</injected_context>"
         )
 
-    # Create the model (Claude or OpenAI)
-    model_name = ctx.model or os.environ.get(
-        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
-    )
-
-    is_claude = model_name.startswith("claude")
-
-    if is_claude:
-        # Base max_tokens - will be increased if thinking is enabled
-        base_max_tokens = 8192
-
-        model_kwargs = {
-            "model": model_name,
-            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-        }
-
-        # Add extended thinking if configured
-        # max_tokens must be greater than thinking.budget_tokens
-        if ctx.thinking_budget > 0:
-            model_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": ctx.thinking_budget,
-            }
-            # Ensure max_tokens > thinking_budget
-            model_kwargs["max_tokens"] = max(
-                base_max_tokens, ctx.thinking_budget + 4096
-            )
-        else:
-            model_kwargs["max_tokens"] = base_max_tokens
-
-        model = ChatAnthropic(**model_kwargs)
-    else:
-        # OpenAI / GPT models
-        model_kwargs = {
-            "model": model_name,
-            "api_key": os.environ.get("OPENAI_API_KEY"),
-            "max_tokens": 8192,
-        }
-
-        # Add reasoning effort for GPT models (if supported)
-        if ctx.reasoning_effort and ctx.reasoning_effort != "none":
-            model_kwargs["reasoning_effort"] = ctx.reasoning_effort
-
-        model = ChatOpenAI(**model_kwargs)
-
-    # Bind tools to model
-    model_with_tools = model.bind_tools(ALL_TOOLS)
-
     # Build messages - repair any dangling tool calls from interrupted sessions
     repaired_messages = repair_dangling_tool_calls(list(state.messages))
     messages = [SystemMessage(content=system_content)] + repaired_messages
 
-    # Invoke the model
-    response = await model_with_tools.ainvoke(messages)
+    # Get primary model
+    primary_model = ctx.model or os.environ.get(
+        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
+    )
+
+    # Build model chain: primary + fallbacks
+    models_to_try = [primary_model] + DEFAULT_FALLBACK_MODELS
+
+    last_error = None
+    for i, model_name in enumerate(models_to_try):
+        try:
+            model_with_tools, is_claude = create_model_with_tools(
+                model_name,
+                thinking_budget=ctx.thinking_budget if i == 0 else 0,  # Only use thinking on primary
+                reasoning_effort=ctx.reasoning_effort if i == 0 else None,
+            )
+
+            if i > 0:
+                logger.warning(
+                    "Falling back to alternative model",
+                    primary_model=primary_model,
+                    fallback_model=model_name,
+                    attempt=i + 1,
+                )
+
+            # Invoke the model
+            response = await model_with_tools.ainvoke(messages)
+
+            if i > 0:
+                logger.info(
+                    "Fallback model succeeded",
+                    model=model_name,
+                )
+
+            break  # Success, exit the loop
+
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+
+            # Only fallback on transient/capacity errors, not on invalid requests
+            is_transient = any(
+                term in error_str
+                for term in [
+                    "overloaded",
+                    "rate limit",
+                    "capacity",
+                    "timeout",
+                    "503",
+                    "529",
+                    "500",
+                    "connection",
+                ]
+            )
+
+            if not is_transient:
+                logger.error(
+                    "Model error is not transient, not falling back",
+                    model=model_name,
+                    error=str(e),
+                )
+                raise
+
+            logger.warning(
+                "Model call failed, will try fallback",
+                model=model_name,
+                error=str(e),
+                attempt=i + 1,
+                remaining_fallbacks=len(models_to_try) - i - 1,
+            )
+
+            if i == len(models_to_try) - 1:
+                # No more fallbacks, raise the last error
+                logger.error("All models failed", primary=primary_model)
+                raise last_error from e
 
     # Check for recursion limit
     if state.is_last_step and response.tool_calls:
