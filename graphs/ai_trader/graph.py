@@ -17,7 +17,7 @@ from typing import Literal
 
 import structlog
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph
@@ -48,6 +48,76 @@ from ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
 from ai_trader.tools.review import TOOLS as REVIEW_TOOLS
 
 logger = structlog.getLogger(__name__)
+
+
+def repair_dangling_tool_calls(messages: list) -> list:
+    """
+    Repair message history when tool calls are interrupted or cancelled before receiving results.
+
+    The problem:
+    - Agent requests tool call: "Please run X"
+    - Tool call is interrupted (user cancels, network error, crash, etc.)
+    - Agent sees tool_call in AIMessage but no corresponding ToolMessage
+    - This creates an invalid message sequence that Claude API rejects
+
+    The solution:
+    - Detects AIMessages with tool_calls that have no results
+    - Creates synthetic ToolMessage responses indicating the call was cancelled
+    - Repairs the message history before agent execution
+
+    Why it's useful:
+    - Prevents "tool_use without tool_result" API errors
+    - Gracefully handles interruptions and errors
+    - Maintains conversation coherence
+    """
+    if not messages:
+        return messages
+
+    repaired = []
+    i = 0
+
+    while i < len(messages):
+        msg = messages[i]
+        repaired.append(msg)
+
+        # Check if this is an AIMessage with tool_calls
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            tool_call_ids = {tc.get("id") or tc.get("tool_call_id") for tc in msg.tool_calls if tc}
+
+            # Look ahead to find which tool_calls have results
+            j = i + 1
+            found_result_ids = set()
+            while j < len(messages):
+                next_msg = messages[j]
+                if isinstance(next_msg, ToolMessage):
+                    found_result_ids.add(next_msg.tool_call_id)
+                elif hasattr(next_msg, "tool_calls") and next_msg.tool_calls:
+                    # Hit another AI message with tool calls, stop looking
+                    break
+                j += 1
+
+            # Create synthetic results for missing tool_calls
+            missing_ids = tool_call_ids - found_result_ids
+            for tool_call in msg.tool_calls:
+                tc_id = tool_call.get("id") or tool_call.get("tool_call_id")
+                if tc_id in missing_ids:
+                    tc_name = tool_call.get("name", "unknown")
+                    logger.warning(
+                        "Repairing dangling tool call",
+                        tool_call_id=tc_id,
+                        tool_name=tc_name,
+                    )
+                    repaired.append(
+                        ToolMessage(
+                            content=f"Tool call was interrupted or cancelled before completion. The tool '{tc_name}' did not return a result.",
+                            tool_call_id=tc_id,
+                        )
+                    )
+
+        i += 1
+
+    return repaired
+
 
 # Combine all tools
 ALL_TOOLS = (
@@ -293,8 +363,9 @@ async def call_model(state: State, *, runtime: Runtime[Context]) -> dict:
     # Bind tools to model
     model_with_tools = model.bind_tools(ALL_TOOLS)
 
-    # Build messages
-    messages = [SystemMessage(content=system_content)] + list(state.messages)
+    # Build messages - repair any dangling tool calls from interrupted sessions
+    repaired_messages = repair_dangling_tool_calls(list(state.messages))
+    messages = [SystemMessage(content=system_content)] + repaired_messages
 
     # Invoke the model
     response = await model_with_tools.ainvoke(messages)
