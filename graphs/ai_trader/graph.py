@@ -98,7 +98,7 @@ class DanglingToolRepairMiddleware(AgentMiddleware[AITraderState]):
     state_schema = AITraderState
 
     def before_model(
-        self, state: AITraderState, _runtime: Runtime
+        self, state: AITraderState, runtime: Runtime
     ) -> dict[str, Any] | None:
         """Repair dangling tool calls before sending to model."""
         messages = list(state.get("messages", []))
