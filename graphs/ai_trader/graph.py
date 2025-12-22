@@ -174,7 +174,7 @@ class ConfigFetcherMiddleware(AgentMiddleware[AITraderState]):
 
     state_schema = AITraderState
 
-    async def before_agent(
+    async def abefore_agent(
         self, _state: AITraderState, runtime: Runtime[Context]
     ) -> dict[str, Any] | None:
         """Fetch config from DB and update runtime context."""
@@ -274,7 +274,7 @@ class SubconsciousMiddleware(AgentMiddleware[AITraderState]):
 
     state_schema = AITraderState
 
-    async def before_agent(
+    async def abefore_agent(
         self, state: AITraderState, runtime: Runtime[Context]
     ) -> dict[str, Any] | None:
         """Inject subconscious context before agent runs."""
