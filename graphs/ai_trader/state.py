@@ -60,3 +60,10 @@ class State(InputState):
     Dynamic context injected by the subconscious layer.
     Contains skills and behaviors retrieved from the knowledge base.
     """
+
+    # Flag to trigger reviewer subgraph
+    request_review: bool = False
+    """
+    When True, routes to the Doubtful Deacon reviewer subgraph.
+    Set by the request_code_review tool, cleared after review completes.
+    """
