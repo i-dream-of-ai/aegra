@@ -1,0 +1,126 @@
+{
+  "prompt": "Analyze the following QuantConnect algorithm (written in Python) and perform two tasks:\n\n1. **Tagging**: Tag it with highly granular professional quantitative finance categories.\n2. **Summarization**: Generate a \"Search Summary\" for the algorithm. This summary should be optimized for RAG searching.\n\nWe are building a RAG system to index hundreds of algorithms. We need precise tags to differentiate between specific implementations.\n\nUse the following taxonomy as a guide. Select the MOST SPECIFIC tags available.\nIf the algorithm uses a specific variation not listed, CREATE A NEW SPECIFIC TAG for it.\n\nTaxonomy:\n{TAXONOMY}\n\nReturn the result as a JSON object with the following structure:\n{\n  \"algorithm_summary\": \"A concise, technical summary of the strategy (e.g., 'Cointegration-based pairs trading on energy sector ETFs using Kalman Filter for hedge ratio estimation').\",\n  \"tags\": {\n    \"Category Name\": [\"Specific Tag 1\", \"Specific Tag 2\"]\n  }\n}\n\nAlgorithm Code:\n```python\n{CODE}\n```",
+  "taxonomy": {
+    "Alpha Streams": [
+      "Price Action",
+      "Volume Analysis",
+      "Order Flow",
+      "Sentiment - News",
+      "Sentiment - Social",
+      "Fundamental - Earnings",
+      "Fundamental - Macro",
+      "Alternative Data - Satellite",
+      "Alternative Data - Credit Card",
+      "Market Microstructure",
+      "Intermarket Analysis"
+    ],
+    "Strategy - Mean Reversion": [
+      "Bollinger Band Reversion",
+      "RSI Reversion",
+      "Z-Score Reversion",
+      "Distance from MA",
+      "Pairs Trading - Cointegration",
+      "Pairs Trading - Distance",
+      "Ornstein-Uhlenbeck Process",
+      "Intraday Mean Reversion",
+      "Overnight Mean Reversion",
+      "Gap Fill Strategies"
+    ],
+    "Strategy - Trend Following": [
+      "Moving Average Crossover",
+      "Donchian Channel Breakout",
+      "Turtle Trading",
+      "MACD Trend",
+      "Supertrend",
+      "Parabolic SAR",
+      "Time Series Momentum",
+      "Cross-Sectional Momentum",
+      "Trend Following - Volatility Scaled"
+    ],
+    "Strategy - Volatility": [
+      "Volatility Arbitrage",
+      "Variance Risk Premium",
+      "Long Straddle/Strangle",
+      "Iron Condor",
+      "VIX Trading",
+      "GARCH Forecasting",
+      "Implied vs Realized Volatility"
+    ],
+    "Strategy - Arbitrage": [
+      "Statistical Arbitrage",
+      "Triangular Arbitrage",
+      "Exchange Arbitrage",
+      "Calendar Spread",
+      "Merger Arbitrage",
+      "Convertible Arbitrage",
+      "Index Arbitrage",
+      "ETF Arbitrage"
+    ],
+    "Strategy - Machine Learning": [
+      "Supervised Learning - Classification",
+      "Supervised Learning - Regression",
+      "Unsupervised Learning - Clustering",
+      "Reinforcement Learning - PPO",
+      "Reinforcement Learning - DQN",
+      "Deep Learning - LSTM",
+      "Deep Learning - Transformer",
+      "Deep Learning - CNN",
+      "Ensemble Methods - Random Forest",
+      "Ensemble Methods - XGBoost",
+      "Genetic Algorithms"
+    ],
+    "Portfolio Construction": [
+      "Equal Weighting",
+      "Market Cap Weighting",
+      "Inverse Volatility Weighting",
+      "Risk Parity",
+      "Mean-Variance Optimization",
+      "Black-Litterman",
+      "Hierarchical Risk Parity (HRP)",
+      "Minimum Variance",
+      "Maximum Diversification",
+      "Kelly Criterion",
+      "CPPI"
+    ],
+    "Risk Management": [
+      "Stop Loss - Fixed %",
+      "Stop Loss - ATR Trailing",
+      "Take Profit - Fixed R:R",
+      "Volatility Targeting",
+      "Drawdown Control",
+      "Sector Exposure Limits",
+      "Beta Hedging",
+      "Value at Risk (VaR) Limit",
+      "Conditional VaR (CVaR) Limit"
+    ],
+    "Execution": [
+      "Market Order",
+      "Limit Order",
+      "Stop Market",
+      "Stop Limit",
+      "Market on Open (MOO)",
+      "Market on Close (MOC)",
+      "TWAP",
+      "VWAP",
+      "Iceberg",
+      "Implementation Shortfall",
+      "Pegged Order",
+      "Limit-if-Touched"
+    ],
+    "Asset Specifics": [
+      "Penny Stocks",
+      "Small Cap",
+      "Large Cap",
+      "Blue Chip",
+      "High Dividend",
+      "Growth Stocks",
+      "Value Stocks",
+      "ETFs - Leveraged",
+      "ETFs - Inverse",
+      "Forex - Majors",
+      "Forex - Exotics",
+      "Crypto - DeFi",
+      "Crypto - Layer 1"
+    ]
+  }
+}
