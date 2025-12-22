@@ -84,6 +84,8 @@ async def generate_retrieval_plan(
     conversation_text = "\n".join(conv_summary)
 
     try:
+        # Disable callbacks to prevent LangGraph from capturing this nested LLM call
+        # Otherwise the planner output leaks into the main stream
         response = await model.ainvoke(
             [
                 SystemMessage(content=PLANNER_PROMPT),
@@ -98,7 +100,8 @@ RECENT CONTEXT:
 
 Output JSON with user_intent, keyword_queries, and semantic_queries."""
                 ),
-            ]
+            ],
+            config={"callbacks": []},
         )
 
         # Parse JSON response

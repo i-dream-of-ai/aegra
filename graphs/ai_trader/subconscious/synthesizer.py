@@ -121,6 +121,7 @@ async def _llm_synthesis(
     )
 
     try:
+        # Disable callbacks to prevent LangGraph from capturing this nested LLM call
         response = await model.ainvoke(
             [
                 SystemMessage(content=SYNTHESIZER_PROMPT),
@@ -135,7 +136,8 @@ RETRIEVED SKILLS:
 
 Synthesize the most relevant skills into actionable context. Output JSON."""
                 ),
-            ]
+            ],
+            config={"callbacks": []},
         )
 
         # Parse JSON response
