@@ -37,7 +37,9 @@ async def wait(seconds: int, reason: str) -> str:
     # Clamp to reasonable bounds
     wait_time = max(1, min(60, seconds))
     await asyncio.sleep(wait_time)
-    return json.dumps({"status": "completed", "waited_seconds": wait_time, "reason": reason})
+    return json.dumps(
+        {"status": "completed", "waited_seconds": wait_time, "reason": reason}
+    )
 
 
 @tool

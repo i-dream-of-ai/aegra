@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
 
-from ai_trader.context import Context, DEFAULT_REVIEWER_PROMPT
+from ai_trader.context import DEFAULT_REVIEWER_PROMPT, Context
 from ai_trader.state import InputState, State
 
 logger = structlog.getLogger(__name__)

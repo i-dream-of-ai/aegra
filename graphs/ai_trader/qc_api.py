@@ -63,7 +63,9 @@ async def qc_request(
         try:
             data = response.json()
         except Exception as e:
-            raise Exception(f"QC API returned invalid JSON for {endpoint}: {response.text[:200]}")
+            raise Exception(
+                f"QC API returned invalid JSON for {endpoint}: {response.text[:200]}"
+            ) from e
 
         # Handle case where API returns a string instead of dict
         if isinstance(data, str):

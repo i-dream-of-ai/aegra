@@ -1,7 +1,7 @@
 """Code review tool - handoff to the Doubtful Deacon reviewer subgraph."""
 
+from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
 
@@ -18,8 +18,12 @@ def request_code_review(runtime: ToolRuntime) -> Command:
     """
     # Get the last AI message to include in handoff
     last_ai_message = next(
-        (msg for msg in reversed(runtime.state["messages"]) if isinstance(msg, AIMessage)),
-        None
+        (
+            msg
+            for msg in reversed(runtime.state["messages"])
+            if isinstance(msg, AIMessage)
+        ),
+        None,
     )
 
     # Create a tool message for the handoff

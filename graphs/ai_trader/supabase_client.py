@@ -85,7 +85,11 @@ class SupabaseClient:
     def _headers(self) -> dict[str, str]:
         """Build request headers."""
         # When using service role, both Authorization and apikey must use service role key
-        apikey = self.service_role_key if self.use_service_role else (self.anon_key or self.service_role_key)
+        apikey = (
+            self.service_role_key
+            if self.use_service_role
+            else (self.anon_key or self.service_role_key)
+        )
         return {
             "Authorization": f"Bearer {self.token}",
             "apikey": apikey,
