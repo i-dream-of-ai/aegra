@@ -290,7 +290,7 @@ async def read_backtest_insights(
             return json.dumps({"error": True, "message": "No project context."})
 
         data = await qc_request(
-            "/backtests/insights/read",
+            "/backtests/read/insights",
             {
                 "projectId": qc_project_id,
                 "backtestId": backtest_id,
