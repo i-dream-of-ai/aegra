@@ -13,6 +13,7 @@ from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import RetryPolicy
 
 from ai_trader.context import DEFAULT_REVIEWER_PROMPT, Context
 from ai_trader.state import InputState, State
@@ -78,7 +79,15 @@ reviewer_builder = StateGraph(
     context_schema=Context,
 )
 
-reviewer_builder.add_node("review", review_node)
+# Retry policy for LLM calls - handles transient API errors
+llm_retry_policy = RetryPolicy(
+    max_attempts=3,
+    initial_interval=2.0,
+    backoff_factor=2.0,
+    max_interval=30.0,
+)
+
+reviewer_builder.add_node("review", review_node, retry=llm_retry_policy)
 reviewer_builder.add_edge("__start__", "review")
 reviewer_builder.add_edge("review", "__end__")
 

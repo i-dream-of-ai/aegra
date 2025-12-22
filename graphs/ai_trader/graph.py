@@ -23,6 +23,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
+from langgraph.types import RetryPolicy
 
 from ai_trader.context import Context
 
@@ -336,10 +337,18 @@ builder = StateGraph(
     context_schema=Context,
 )
 
+# Retry policy for LLM calls - handles transient API errors (overloaded, rate limits, etc.)
+llm_retry_policy = RetryPolicy(
+    max_attempts=3,
+    initial_interval=2.0,  # Start with 2 second delay
+    backoff_factor=2.0,  # Exponential backoff: 2s, 4s, 8s
+    max_interval=30.0,  # Cap at 30 seconds
+)
+
 # Add nodes
 builder.add_node("fetch_config", fetch_agent_config)
 builder.add_node("subconscious", subconscious_node)
-builder.add_node("call_model", call_model)
+builder.add_node("call_model", call_model, retry=llm_retry_policy)
 builder.add_node("tools", ToolNode(ALL_TOOLS))
 builder.add_node("reviewer", reviewer_graph)  # Doubtful Deacon subgraph
 
