@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import contextlib
 import os
-from typing import Any, Literal, NotRequired
+from typing import Any, Literal
+
+from typing_extensions import NotRequired
 
 import structlog
 from langchain.agents import AgentState, create_agent
