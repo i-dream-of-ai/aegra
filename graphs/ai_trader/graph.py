@@ -19,10 +19,10 @@ import structlog
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from langgraph.types import dispatch_custom_event
 
 from ai_trader.context import Context
 
@@ -184,24 +184,21 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         return {}
 
     try:
+        # Get stream writer for custom events
+        writer = get_stream_writer()
+
         # Create middleware with event dispatcher
         def emit_event(event: SubconsciousEvent):
-            """Dispatch event to LangGraph stream.
+            """Write event to LangGraph stream.
 
             Frontend type guards expect:
             - subconscious_thinking: {type: 'subconscious_thinking', stage: '...'}
             - instinct_injection: {type: 'instinct_injection', data: {...}}
             """
             if event.type == "instinct_injection":
-                dispatch_custom_event(
-                    event.type,
-                    {"type": event.type, "data": event.data or {}},
-                )
+                writer({"type": event.type, "data": event.data or {}})
             else:
-                dispatch_custom_event(
-                    event.type,
-                    {"type": event.type, "stage": event.stage},
-                )
+                writer({"type": event.type, "stage": event.stage})
 
         middleware = SubconsciousMiddleware(on_event=emit_event)
 
@@ -226,7 +223,8 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
         logger.warning("Subconscious injection failed", error=str(e))
         # Emit done event even on failure so UI doesn't hang
         with contextlib.suppress(Exception):
-            dispatch_custom_event("subconscious_thinking", {"stage": "done"})
+            writer = get_stream_writer()
+            writer({"type": "subconscious_thinking", "stage": "done"})
         return {}
 
 
