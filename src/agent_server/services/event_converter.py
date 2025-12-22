@@ -170,6 +170,7 @@ class EventConverter:
                 error_msg = payload.get("error", "Unknown error")
                 # Log for debugging
                 import structlog
+
                 structlog.getLogger(__name__).info(
                     f"[event_converter] Converting error end event: {error_msg[:200]}"
                 )

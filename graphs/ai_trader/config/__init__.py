@@ -100,6 +100,7 @@ AGENTS = {
 # SUBCONSCIOUS LAYER CONFIGURATION
 # =============================================================================
 
+
 def get_model_provider(model: str) -> str:
     """Detect if a model is Claude or GPT."""
     if model.startswith("claude"):
@@ -206,6 +207,7 @@ SUMMARIZATION_CONFIG_FULL = {
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
 
 def get_agent_config(agent_name: str) -> dict[str, Any]:
     """Get agent config with model-appropriate settings."""
