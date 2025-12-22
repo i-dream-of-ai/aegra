@@ -1,7 +1,10 @@
 """
-AI Trader Agent - LangChain create_agent Implementation
+AI Trader Agent - Multi-Agent Handoffs Implementation
 
-This graph uses the LangChain create_agent pattern with middleware for:
+This graph uses the LangChain create_agent pattern wrapped in a parent StateGraph
+to enable handoffs between agents (main -> reviewer) using Command.PARENT.
+
+Middleware provides:
 - Dynamic model selection (based on runtime context from DB)
 - Dynamic system prompt (based on runtime context from DB)
 - Model fallback (automatic failover on errors)
@@ -14,13 +17,12 @@ from __future__ import annotations
 
 import contextlib
 import os
-from typing import Any
+from typing import Any, Literal, NotRequired
 
 import structlog
-from langchain.agents import create_agent
+from langchain.agents import AgentState, create_agent
 from langchain.agents.middleware import (
     AgentMiddleware,
-    AgentState,
     ModelFallbackMiddleware,
     ModelRequest,
     ModelResponse,
@@ -30,13 +32,14 @@ from langchain.agents.middleware import (
     wrap_model_call,
 )
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
+from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from ai_trader.context import Context
-from ai_trader.prompts import DEFAULT_MAIN_PROMPT
+from ai_trader.prompts import DEFAULT_MAIN_PROMPT, DEFAULT_REVIEWER_PROMPT
 
 # Import subconscious components
 from ai_trader.subconscious.middleware import (
@@ -44,7 +47,7 @@ from ai_trader.subconscious.middleware import (
 )
 from ai_trader.subconscious.types import SubconsciousEvent  # noqa: TC001
 
-# Import all tools
+# Import all tools (except review - we'll define the handoff tool here)
 from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
 from ai_trader.tools.backtest import TOOLS as BACKTEST_TOOLS
 from ai_trader.tools.compile import TOOLS as COMPILE_TOOLS
@@ -53,6 +56,9 @@ from ai_trader.tools.files import TOOLS as FILES_TOOLS
 from ai_trader.tools.misc import TOOLS as MISC_TOOLS
 from ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
 from ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
+
+# Import handoff tools separately
+from ai_trader.tools.review import REVIEWER_TOOLS
 from ai_trader.tools.review import TOOLS as REVIEW_TOOLS
 
 logger = structlog.getLogger(__name__)
@@ -72,15 +78,18 @@ ALL_TOOLS = (
 
 
 # =============================================================================
-# Custom State (extends AgentState with our fields)
+# Custom State (extends AgentState with handoff tracking)
 # =============================================================================
 
 
 class AITraderState(AgentState):
-    """Extended state for AI Trader agent."""
+    """Extended state for AI Trader agent with handoff support."""
 
     # Subconscious injection context (populated by SubconsciousMiddleware)
     subconscious_context: str | None = None
+
+    # Track which agent is active for routing
+    active_agent: NotRequired[str]
 
 
 # =============================================================================
@@ -98,6 +107,15 @@ def _get_default_model():
         model="gpt-5",
         max_tokens=8192,
         api_key=os.environ.get("OPENAI_API_KEY", "placeholder"),
+    )
+
+
+def _get_reviewer_model():
+    """Get reviewer model - uses Claude for critique."""
+    return ChatAnthropic(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=4096,
+        api_key=os.environ.get("ANTHROPIC_API_KEY", "placeholder"),
     )
 
 
@@ -346,40 +364,120 @@ class SubconsciousMiddleware(AgentMiddleware[AITraderState]):
 
 
 # =============================================================================
-# Create the Agent
+# Create Agents
 # =============================================================================
 
-graph = create_agent(
-    # Default model (overridden by dynamic_model_middleware based on context)
+# Shared middleware stack for the main agent
+MAIN_MIDDLEWARE = [
+    # 1. Model fallback - automatic failover on errors
+    ModelFallbackMiddleware(
+        "claude-sonnet-4-5-20250929",  # First fallback
+        "gpt-5",  # Cross-provider fallback
+    ),
+    # 2. Summarization - compress long conversations to fit context
+    SummarizationMiddleware(
+        model="gpt-5-mini",  # Fast/cheap model for summarization
+        trigger=("tokens", 100000),  # Trigger when messages exceed 100k tokens
+        keep=("messages", 20),  # Keep last 20 messages intact
+    ),
+    # 3. Todo list - task planning and tracking
+    TodoListMiddleware(),
+    # 4. Subconscious - RAG + memory injection (runs before model selection)
+    SubconsciousMiddleware(),
+    # 5. Patch dangling tool calls - fix interrupted sessions
+    patch_dangling_tool_calls,
+    # 6. Dynamic model - select model based on context from DB
+    dynamic_model_middleware,
+    # 7. Dynamic prompt - set system prompt from context + inject subconscious
+    dynamic_system_prompt,
+]
+
+# Main agent (Shooby Dooby) - has all trading tools + handoff tool
+main_agent = create_agent(
     model=_get_default_model(),
-    # All available tools
     tools=ALL_TOOLS,
-    # Middleware stack (executed in order)
-    middleware=[
-        # 1. Model fallback - automatic failover on errors
-        ModelFallbackMiddleware(
-            "claude-sonnet-4-5-20250929",  # First fallback
-            "gpt-5",  # Cross-provider fallback
-        ),
-        # 2. Summarization - compress long conversations to fit context
-        SummarizationMiddleware(
-            model="gpt-5-mini",  # Fast/cheap model for summarization
-            trigger=("tokens", 100000),  # Trigger when messages exceed 100k tokens
-            keep=("messages", 20),  # Keep last 20 messages intact
-        ),
-        # 3. Todo list - task planning and tracking
-        TodoListMiddleware(),
-        # 4. Subconscious - RAG + memory injection (runs before model selection)
-        SubconsciousMiddleware(),
-        # 5. Patch dangling tool calls - fix interrupted sessions
-        patch_dangling_tool_calls,
-        # 6. Dynamic model - select model based on context from DB
-        dynamic_model_middleware,
-        # 7. Dynamic prompt - set system prompt from context + inject subconscious
-        dynamic_system_prompt,
-    ],
-    # Context schema for runtime configuration (passed at invocation)
+    middleware=MAIN_MIDDLEWARE,
     context_schema=Context,
-    # Graph name for debugging
     name="Shooby Dooby",
 )
+
+# Reviewer agent (Doubtful Deacon) - has handoff tool to transfer back
+reviewer_agent = create_agent(
+    model=_get_reviewer_model(),
+    tools=REVIEWER_TOOLS,  # Only has transfer_to_main_agent for handoff back
+    system_prompt=DEFAULT_REVIEWER_PROMPT,
+    name="Doubtful Deacon",
+)
+
+
+# =============================================================================
+# Agent Nodes (wrap agents for parent graph)
+# =============================================================================
+
+
+def call_main_agent(state: AITraderState):
+    """Node that invokes the main agent."""
+    logger.info("Calling main agent (Shooby Dooby)")
+    return main_agent.invoke(state)
+
+
+def call_reviewer_agent(state: AITraderState):
+    """Node that invokes the reviewer agent."""
+    logger.info("Calling reviewer agent (Doubtful Deacon)")
+    return reviewer_agent.invoke(state)
+
+
+# =============================================================================
+# Routing Logic
+# =============================================================================
+
+
+def route_after_agent(
+    state: AITraderState,
+) -> Literal["main_agent", "reviewer", "__end__"]:
+    """Route based on active_agent, or END if agent finished without handoff."""
+    messages = state.get("messages", [])
+
+    # Check the last message - if it's an AIMessage without tool calls, we're done
+    if messages:
+        last_msg = messages[-1]
+        if isinstance(last_msg, AIMessage) and not last_msg.tool_calls:
+            logger.info("Agent finished without tool calls, ending")
+            return "__end__"
+
+    # Route to active agent
+    active = state.get("active_agent", "main_agent")
+    logger.info(f"Routing to active agent: {active}")
+    return active if active in ("main_agent", "reviewer") else "main_agent"
+
+
+def route_initial(
+    state: AITraderState,
+) -> Literal["main_agent", "reviewer"]:
+    """Route to active agent based on state, default to main agent."""
+    return state.get("active_agent") or "main_agent"
+
+
+# =============================================================================
+# Build Parent Graph
+# =============================================================================
+
+builder = StateGraph(AITraderState)
+
+# Add agent nodes
+builder.add_node("main_agent", call_main_agent)
+builder.add_node("reviewer", call_reviewer_agent)
+
+# Start with conditional routing (usually main_agent)
+builder.add_conditional_edges(START, route_initial, ["main_agent", "reviewer"])
+
+# After each agent, check if we should end or route to another
+builder.add_conditional_edges(
+    "main_agent", route_after_agent, ["main_agent", "reviewer", END]
+)
+builder.add_conditional_edges(
+    "reviewer", route_after_agent, ["main_agent", "reviewer", END]
+)
+
+# Compile the parent graph
+graph = builder.compile(name="AI Trader")
