@@ -236,6 +236,10 @@ class PatchToolCallsMiddleware(AgentMiddleware[AITraderState]):
     ) -> dict[str, Any] | None:
         """Patch dangling tool calls before sending messages to the model."""
         messages = state.get("messages", [])
+        logger.info(
+            "PatchToolCallsMiddleware running",
+            message_count=len(messages) if messages else 0,
+        )
         if not messages:
             return None
 
