@@ -173,14 +173,20 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
     """
     ctx = runtime.context
 
+    logger.info(
+        "Subconscious node starting",
+        subconscious_enabled=ctx.subconscious_enabled,
+        has_access_token=bool(ctx.access_token),
+    )
+
     if not ctx.subconscious_enabled:
-        logger.debug("Subconscious disabled, skipping")
+        logger.info("Subconscious disabled, skipping")
         return {}
 
     # Get access token for DB queries
     access_token = ctx.access_token
     if not access_token:
-        logger.debug("No access token, skipping subconscious")
+        logger.info("No access token, skipping subconscious")
         return {}
 
     try:
