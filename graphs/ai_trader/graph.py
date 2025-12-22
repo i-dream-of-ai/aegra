@@ -186,11 +186,22 @@ async def subconscious_node(state: State, *, runtime: Runtime[Context]) -> dict:
     try:
         # Create middleware with event dispatcher
         def emit_event(event: SubconsciousEvent):
-            """Dispatch event to LangGraph stream."""
-            dispatch_custom_event(
-                event.type,
-                {"stage": event.stage, **(event.data or {})},
-            )
+            """Dispatch event to LangGraph stream.
+
+            Frontend type guards expect:
+            - subconscious_thinking: {type: 'subconscious_thinking', stage: '...'}
+            - instinct_injection: {type: 'instinct_injection', data: {...}}
+            """
+            if event.type == "instinct_injection":
+                dispatch_custom_event(
+                    event.type,
+                    {"type": event.type, "data": event.data or {}},
+                )
+            else:
+                dispatch_custom_event(
+                    event.type,
+                    {"type": event.type, "stage": event.stage},
+                )
 
         middleware = SubconsciousMiddleware(on_event=emit_event)
 
