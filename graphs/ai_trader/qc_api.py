@@ -55,7 +55,15 @@ async def qc_request(
             )
 
         response.raise_for_status()
-        data = response.json()
+
+        # Handle empty response body
+        if not response.content or response.content.strip() == b"":
+            raise Exception(f"QC API returned empty response for {endpoint}")
+
+        try:
+            data = response.json()
+        except Exception as e:
+            raise Exception(f"QC API returned invalid JSON for {endpoint}: {response.text[:200]}")
 
         # Handle case where API returns a string instead of dict
         if isinstance(data, str):
