@@ -170,12 +170,22 @@ class SubconsciousMiddleware:
             self.state.last_injection_turn = current_turn
             self.state.injection_count += 1
 
-            # Emit injection event
+            # Build skill info for UI
+            skill_info = [
+                {"id": s.id, "name": s.name, "tags": s.tags}
+                for s in unique_skills
+                if s.id in result.skill_ids
+            ]
+
+            # Emit injection event with skill details for UI
             self.emit(
                 SubconsciousEvent(
                     type="instinct_injection",
                     data={
                         "skillIds": result.skill_ids,
+                        "skills": skill_info,
+                        "userIntent": plan.user_intent,
+                        "content": result.content[:500] if result.content else None,
                         "tokenCount": result.token_count,
                         "driftScore": result.drift_score,
                         "synthesisMethod": result.synthesis_method,
