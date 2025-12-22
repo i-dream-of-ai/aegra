@@ -34,7 +34,8 @@ class SubconsciousState:
     """State tracked across turns for drift detection."""
 
     injected_topics: list[str] = field(default_factory=list)
-    last_injection_turn: int = 0
+    # Start at -2 so first injection (turn 0) always passes rate limiting
+    last_injection_turn: int = -2
     injection_count: int = 0
 
 
