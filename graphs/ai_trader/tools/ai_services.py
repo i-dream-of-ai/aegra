@@ -11,30 +11,22 @@ from ai_trader.qc_api import qc_request
 from ai_trader.supabase_client import SupabaseClient
 
 
-def _get_qc_project_id():
-    """Get QC project ID from LangGraph config."""
-    from langgraph.config import get_config
-
-    config = get_config()
-    return config.get("configurable", {}).get("qc_project_id")
-
-
 @tool
-async def check_initialization_errors(code: str) -> str:
+async def check_initialization_errors(code: str, file_name: str = "main.py") -> str:
     """
-    Check Python code for potential initialization errors.
+    Check Python code for potential initialization errors by running a short backtest.
 
     Args:
         code: Python code to check
+        file_name: Name of the file (default: main.py)
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
         data = await qc_request(
             "/ai/tools/backtest-init",
-            {"projectId": qc_project_id, "code": code},
+            {
+                "language": "Py",
+                "files": [{"name": file_name, "content": code}],
+            },
         )
         return json.dumps(data, indent=2)
 
@@ -45,25 +37,21 @@ async def check_initialization_errors(code: str) -> str:
 
 
 @tool
-async def complete_code(code: str, cursor_position: int) -> str:
+async def complete_code(sentence: str, response_limit: int = 10) -> str:
     """
     AI code completion for QuantConnect algorithms.
 
     Args:
-        code: Code context
-        cursor_position: Cursor position in the code
+        sentence: The code fragment to complete (e.g., "self.add_eq", "AddEq")
+        response_limit: Maximum number of completion suggestions (default: 10)
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
         data = await qc_request(
             "/ai/tools/complete",
             {
-                "projectId": qc_project_id,
-                "code": code,
-                "cursorPosition": cursor_position,
+                "language": "Py",
+                "sentence": sentence,
+                "responseSizeLimit": response_limit,
             },
         )
         return json.dumps(data, indent=2)
@@ -75,22 +63,25 @@ async def complete_code(code: str, cursor_position: int) -> str:
 
 
 @tool
-async def enhance_error_message(error_message: str, code: str) -> str:
+async def enhance_error_message(error_message: str, stacktrace: str = None) -> str:
     """
     Get enhanced error explanations with suggestions for fixes.
 
     Args:
         error_message: Error message to enhance
-        code: Code context
+        stacktrace: Optional stack trace for additional context
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+        error_obj = {"message": error_message}
+        if stacktrace:
+            error_obj["stacktrace"] = stacktrace
 
         data = await qc_request(
             "/ai/tools/error-enhance",
-            {"projectId": qc_project_id, "errorMessage": error_message, "code": code},
+            {
+                "language": "Py",
+                "error": error_obj,
+            },
         )
         return json.dumps(data, indent=2)
 
@@ -101,20 +92,21 @@ async def enhance_error_message(error_message: str, code: str) -> str:
 
 
 @tool
-async def check_syntax(code: str) -> str:
+async def check_syntax(code: str, file_name: str = "main.py") -> str:
     """
     Check Python code syntax for errors before compiling.
 
     Args:
         code: Python code to check
+        file_name: Name of the file (default: main.py)
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
         data = await qc_request(
-            "/ai/tools/syntax-check", {"projectId": qc_project_id, "code": code}
+            "/ai/tools/syntax-check",
+            {
+                "language": "Py",
+                "files": [{"name": file_name, "content": code}],
+            },
         )
         return json.dumps(data, indent=2)
 
@@ -123,20 +115,20 @@ async def check_syntax(code: str) -> str:
 
 
 @tool
-async def update_code_to_pep8(code: str) -> str:
+async def update_code_to_pep8(code: str, file_name: str = "main.py") -> str:
     """
     Format Python code to PEP8 standards.
 
     Args:
         code: Code to format
+        file_name: Name of the file (default: main.py)
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
         data = await qc_request(
-            "/ai/tools/pep8-convert", {"projectId": qc_project_id, "code": code}
+            "/ai/tools/pep8-convert",
+            {
+                "files": [{"name": file_name, "content": code}],
+            },
         )
         return json.dumps(data, indent=2)
 
@@ -149,16 +141,12 @@ async def update_code_to_pep8(code: str) -> str:
 @tool
 async def search_quantconnect(query: str) -> str:
     """
-    Search QuantConnect documentation.
+    Search QuantConnect documentation and examples.
 
     Args:
         query: Search query
     """
     try:
-        qc_project_id = _get_qc_project_id()
-        if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
-
         # Use QC's structured search format with criteria
         data = await qc_request(
             "/ai/tools/search",
