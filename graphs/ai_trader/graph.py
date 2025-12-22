@@ -385,7 +385,7 @@ def create_dynamic_model(_state: AITraderState, runtime: Runtime[Context]):
     ctx = runtime.context
 
     model_name = ctx.model or os.environ.get(
-        "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
+        "ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
     )
 
     is_claude = model_name.startswith("claude")
@@ -424,19 +424,26 @@ def create_dynamic_model(_state: AITraderState, runtime: Runtime[Context]):
 
 
 # =============================================================================
-# Create the Agent
+# Dynamic System Prompt Selection
 # =============================================================================
 
-# Get default system prompt from context
-from ai_trader.context import DEFAULT_SYSTEM_PROMPT
+
+def get_system_prompt(_state: AITraderState, runtime: Runtime[Context]) -> str:
+    """Get system prompt from runtime context (loaded from DB by ConfigFetcherMiddleware)."""
+    return runtime.context.system_prompt
+
+
+# =============================================================================
+# Create the Agent
+# =============================================================================
 
 graph = create_agent(
     # Dynamic model selection based on runtime context
     model=create_dynamic_model,
     # All available tools
     tools=ALL_TOOLS,
-    # Default system prompt (can be overridden via context)
-    system_prompt=DEFAULT_SYSTEM_PROMPT,
+    # Dynamic system prompt from DB config
+    system_prompt=get_system_prompt,
     # Context schema for runtime configuration
     context_schema=Context,
     # Middleware stack (executed in order)

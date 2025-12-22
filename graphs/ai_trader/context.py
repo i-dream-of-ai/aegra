@@ -103,7 +103,7 @@ class Context:
     system_prompt: str = field(default=DEFAULT_SYSTEM_PROMPT)
     model: str = field(
         default_factory=lambda: os.environ.get(
-            "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
+            "ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
         )
     )
     thinking_budget: int = 10000  # For Claude models (default from UI)
@@ -113,7 +113,7 @@ class Context:
     reviewer_prompt: str = field(default=DEFAULT_REVIEWER_PROMPT)
     reviewer_model: str = field(
         default_factory=lambda: os.environ.get(
-            "ANTHROPIC_MODEL", "claude-opus-4-5-20251101"
+            "ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
         )
     )
     reviewer_thinking_budget: int = 0  # For Claude models
