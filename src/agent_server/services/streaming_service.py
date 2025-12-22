@@ -137,11 +137,20 @@ class StreamingService:
                 },
             )
         elif stream_mode_label == "values" or stream_mode_label == "updates":
+            # Filter out empty __interrupt__ arrays from values events
+            # The SDK incorrectly interprets __interrupt__: [] as a breakpoint interrupt
+            filtered_payload = event_payload
+            if isinstance(event_payload, dict) and "__interrupt__" in event_payload:
+                interrupt_data = event_payload.get("__interrupt__", [])
+                if not interrupt_data or len(interrupt_data) == 0:
+                    filtered_payload = {
+                        k: v for k, v in event_payload.items() if k != "__interrupt__"
+                    }
             await store_sse_event(
                 run_id,
                 event_id,
                 "values",
-                {"type": "execution_values", "chunk": event_payload},
+                {"type": "execution_values", "chunk": filtered_payload},
             )
         elif stream_mode_label == "custom":
             # Store custom events for replay (subconscious events, etc.)
