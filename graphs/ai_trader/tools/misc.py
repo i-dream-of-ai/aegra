@@ -1,5 +1,6 @@
 """Miscellaneous tools for QuantConnect projects."""
 
+import asyncio
 import json
 
 from langchain_core.tools import tool
@@ -26,20 +27,18 @@ def _get_project_db_id():
 
 
 @tool
-async def wait(reason: str) -> str:
+async def wait(seconds: int, reason: str) -> str:
     """
-    Pause execution to check for updates (tool results or user messages).
+    Wait for a specified duration before continuing.
 
     Args:
-        reason: Why we are waiting (e.g., "Waiting for backtest result")
+        seconds: Number of seconds to wait (1-60)
+        reason: Why we are waiting (e.g., "Waiting for backtest to complete")
     """
-    result = interrupt(
-        {
-            "type": "check_inbox",
-            "reason": reason,
-        }
-    )
-    return result if result else json.dumps({"status": "no_update"})
+    # Clamp to reasonable bounds
+    wait_time = max(1, min(60, seconds))
+    await asyncio.sleep(wait_time)
+    return json.dumps({"status": "completed", "waited_seconds": wait_time, "reason": reason})
 
 
 @tool
