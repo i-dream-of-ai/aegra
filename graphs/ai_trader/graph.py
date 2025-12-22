@@ -34,8 +34,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
-# Import PatchToolCallsMiddleware from deepagents
-from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
+# We use our own version that runs before_model (not before_agent)
+# because before_agent only runs once at start, but we need to patch
+# messages loaded from checkpoint on every model call
+from langchain_core.messages import ToolMessage
+from langgraph.types import Overwrite
 
 from ai_trader.context import Context
 from ai_trader.prompts import DEFAULT_MAIN_PROMPT
@@ -204,6 +207,81 @@ def dynamic_system_prompt(request: ModelRequest) -> str:
         )
 
     return system_prompt
+
+
+# =============================================================================
+# Middleware: Patch Dangling Tool Calls (before_model version)
+# =============================================================================
+
+
+class PatchToolCallsMiddleware(AgentMiddleware[AITraderState]):
+    """
+    Patches dangling tool calls in the message history before each model call.
+
+    Uses before_model (not before_agent) because:
+    - before_agent only runs once at the start of the agent loop
+    - Messages loaded from checkpoint need patching on every model call
+    - The Anthropic API requires every tool_use to have a tool_result
+
+    This fixes the error:
+    "tool_use ids were found without tool_result blocks immediately after"
+    """
+
+    state_schema = AITraderState
+
+    def before_model(
+        self,
+        state: AITraderState,
+        runtime: Runtime,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
+        """Patch dangling tool calls before sending messages to the model."""
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        patched_messages = []
+        made_repairs = False
+
+        for i, msg in enumerate(messages):
+            patched_messages.append(msg)
+
+            # Check if this is an AI message with tool_calls
+            if getattr(msg, "type", None) == "ai" and getattr(msg, "tool_calls", None):
+                for tool_call in msg.tool_calls:
+                    tool_call_id = tool_call.get("id")
+                    if not tool_call_id:
+                        continue
+
+                    # Look for a corresponding ToolMessage in the remaining messages
+                    has_result = any(
+                        getattr(m, "type", None) == "tool"
+                        and getattr(m, "tool_call_id", None) == tool_call_id
+                        for m in messages[i + 1 :]
+                    )
+
+                    if not has_result:
+                        # Create a synthetic tool result
+                        tool_name = tool_call.get("name", "unknown")
+                        logger.warning(
+                            "Patching dangling tool call",
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                        )
+                        patched_messages.append(
+                            ToolMessage(
+                                content=(
+                                    f"Tool call {tool_name} with id {tool_call_id} was "
+                                    "cancelled - another message came in before it could be completed."
+                                ),
+                                name=tool_name,
+                                tool_call_id=tool_call_id,
+                            )
+                        )
+                        made_repairs = True
+
+        if made_repairs:
+            return {"messages": Overwrite(patched_messages)}
+        return None
 
 
 # =============================================================================
