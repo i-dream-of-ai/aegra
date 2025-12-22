@@ -30,10 +30,12 @@ from langchain.agents.middleware import (
     wrap_model_call,
 )
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+
+# Import PatchToolCallsMiddleware from deepagents
+from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 
 from ai_trader.context import Context
 from ai_trader.prompts import DEFAULT_MAIN_PROMPT
@@ -201,89 +203,6 @@ def dynamic_system_prompt(request: ModelRequest) -> str:
 
 
 # =============================================================================
-# Middleware: Dangling Tool Call Repair
-# =============================================================================
-
-
-class DanglingToolRepairMiddleware(AgentMiddleware[AITraderState]):
-    """
-    Repairs message history when tool calls are interrupted.
-
-    The problem:
-    - Agent requests tool call
-    - Tool call is interrupted (user cancels, network error, crash)
-    - Agent sees tool_call in AIMessage but no corresponding ToolMessage
-    - This creates an invalid message sequence that Claude API rejects
-
-    The solution:
-    - Detects AIMessages with tool_calls that have no results
-    - Creates synthetic ToolMessage responses indicating cancellation
-    """
-
-    state_schema = AITraderState
-
-    def before_model(
-        self, state: AITraderState, runtime: Runtime
-    ) -> dict[str, Any] | None:
-        """Repair dangling tool calls before sending to model."""
-        messages = list(state.get("messages", []))
-        if not messages:
-            return None
-
-        repaired = []
-        i = 0
-        made_repairs = False
-
-        while i < len(messages):
-            msg = messages[i]
-            repaired.append(msg)
-
-            # Check if this is an AIMessage with tool_calls
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                tool_call_ids = {
-                    tc.get("id") or tc.get("tool_call_id")
-                    for tc in msg.tool_calls
-                    if tc
-                }
-
-                # Look ahead to find which tool_calls have results
-                j = i + 1
-                found_result_ids = set()
-                while j < len(messages):
-                    next_msg = messages[j]
-                    if isinstance(next_msg, ToolMessage):
-                        found_result_ids.add(next_msg.tool_call_id)
-                    elif hasattr(next_msg, "tool_calls") and next_msg.tool_calls:
-                        break
-                    j += 1
-
-                # Create synthetic results for missing tool_calls
-                missing_ids = tool_call_ids - found_result_ids
-                for tool_call in msg.tool_calls:
-                    tc_id = tool_call.get("id") or tool_call.get("tool_call_id")
-                    if tc_id in missing_ids:
-                        tc_name = tool_call.get("name", "unknown")
-                        logger.warning(
-                            "Repairing dangling tool call",
-                            tool_call_id=tc_id,
-                            tool_name=tc_name,
-                        )
-                        repaired.append(
-                            ToolMessage(
-                                content=f"Tool call was interrupted or cancelled. The tool '{tc_name}' did not return a result.",
-                                tool_call_id=tc_id,
-                            )
-                        )
-                        made_repairs = True
-
-            i += 1
-
-        if made_repairs:
-            return {"messages": repaired}
-        return None
-
-
-# =============================================================================
 # Middleware: Subconscious Injection (RAG + Memory)
 # =============================================================================
 
@@ -376,8 +295,8 @@ graph = create_agent(
         TodoListMiddleware(),
         # 4. Subconscious - RAG + memory injection (runs before model selection)
         SubconsciousMiddleware(),
-        # 5. Dangling tool repair - fix interrupted sessions
-        DanglingToolRepairMiddleware(),
+        # 5. Patch dangling tool calls - fix interrupted sessions (from deepagents)
+        PatchToolCallsMiddleware(),
         # 6. Dynamic model - select model based on context from DB
         dynamic_model_middleware,
         # 7. Dynamic prompt - set system prompt from context + inject subconscious
