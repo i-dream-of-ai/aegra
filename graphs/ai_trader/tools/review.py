@@ -1,16 +1,16 @@
-"""Code review tool - reviewer as a subagent with full tool access.
+"""Code review tool - reviewer subagent with full tool access.
 
-Pattern from official LangChain docs:
-https://docs.langchain.com/oss/python/langchain/multi-agent/subagents
+The reviewer (Doubtful Deacon) has access to read files, compile code,
+check backtest results, and search the knowledge base. It runs as an
+isolated subagent without a checkpointer to ensure complete state
+isolation from the parent agent.
 
-The main agent calls the reviewer as a tool, which invokes a separate
-agent with its own tools and context. This keeps contexts isolated.
+Pattern: https://docs.langchain.com/oss/python/langchain/multi-agent/subagents
 """
 
 from datetime import UTC, datetime
 
 from langchain.agents import create_agent
-from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 
 from ai_trader.prompts import DEFAULT_REVIEWER_PROMPT
@@ -22,7 +22,7 @@ from ai_trader.tools.compile import TOOLS as COMPILE_TOOLS
 from ai_trader.tools.files import TOOLS as FILES_TOOLS
 
 # Reviewer gets read-only tools for analysis (no composite/write tools)
-REVIEWER_AGENT_TOOLS = list(
+REVIEWER_TOOLS = list(
     FILES_TOOLS  # Can read files
     + BACKTEST_TOOLS  # Can read backtest results
     + COMPILE_TOOLS  # Can compile to check for errors
@@ -31,40 +31,21 @@ REVIEWER_AGENT_TOOLS = list(
 
 
 def _create_reviewer_agent():
-    """Create the reviewer agent (Doubtful Deacon) with tools.
+    """Create a stateless reviewer agent.
 
-    Uses create_agent from langchain.agents following the official
-    subagent pattern. The model is tagged for streaming disambiguation.
+    NO checkpointer = stateless = complete isolation from parent.
+    Each invocation starts fresh with no shared state.
     """
     system_prompt = DEFAULT_REVIEWER_PROMPT.format(
         system_time=datetime.now(tz=UTC).isoformat()
     )
 
-    # Initialize model with tags for streaming disambiguation
-    # when using subgraphs=True in the parent graph
-    reviewer_model = init_chat_model(
-        "anthropic:claude-sonnet-4-5-20250929",
-        tags=["reviewer_subagent"],
-        max_tokens=8192,
-    )
-
     return create_agent(
-        model=reviewer_model,
-        tools=REVIEWER_AGENT_TOOLS,
+        model="anthropic:claude-sonnet-4-5-20250929",
+        tools=REVIEWER_TOOLS,
         system_prompt=system_prompt,
+        # NO checkpointer - ensures stateless, isolated execution
     )
-
-
-# Create the reviewer agent once at module load
-_reviewer_agent = None
-
-
-def _get_reviewer_agent():
-    """Get or create the reviewer agent (lazy initialization)."""
-    global _reviewer_agent
-    if _reviewer_agent is None:
-        _reviewer_agent = _create_reviewer_agent()
-    return _reviewer_agent
 
 
 @tool(
@@ -76,30 +57,43 @@ on the algorithm implementation. The reviewer will analyze the code
 and provide critique on bugs, QuantConnect pitfalls, and potential improvements.
 
 The reviewer has access to read files, check backtest results, compile code,
-and search the algorithm knowledge base.""",
+and search the algorithm knowledge base. You can just describe what you want
+reviewed and the reviewer will read the necessary files.""",
 )
-async def request_code_review(code_summary: str) -> str:
+async def request_code_review(review_request: str) -> str:
     """
     Request a code review from the reviewer subagent.
 
     Args:
-        code_summary: A summary of the code changes and what you want reviewed.
-                      Include the key parts of the algorithm, recent changes,
-                      and any specific concerns you want addressed.
+        review_request: Description of what to review. Can include:
+                        - File paths to review
+                        - Specific concerns to address
+                        - Backtest results to analyze
+                        - Recent changes made
 
     Returns:
         The reviewer's critique and suggestions.
     """
-    agent = _get_reviewer_agent()
+    # Create fresh agent each time (stateless, isolated)
+    agent = _create_reviewer_agent()
 
-    # Invoke the reviewer agent asynchronously (subagents are stateless per invocation)
-    result = await agent.ainvoke({"messages": [{"role": "user", "content": code_summary}]})
+    # Invoke with fresh message list - no shared history
+    result = await agent.ainvoke({
+        "messages": [{"role": "user", "content": review_request}]
+    })
 
-    # Get the final message content from the result
+    # Extract only the final message content
     messages = result.get("messages", [])
     if messages:
         last_message = messages[-1]
         content = getattr(last_message, "content", str(last_message))
+        # Handle content blocks (text blocks from Claude)
+        if isinstance(content, list):
+            text_parts = [
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            ]
+            return "\n".join(text_parts)
         return content if isinstance(content, str) else str(content)
 
     return "No response from reviewer."
