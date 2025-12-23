@@ -7,6 +7,11 @@ import os
 from langchain_core.tools import tool
 
 from ai_trader.qc_api import qc_request
+from ai_trader.supabase_client import (
+    SupabaseClient,
+    get_project_db_id,
+    get_qc_project_id,
+)
 
 
 def _get_qc_project_id():
@@ -62,6 +67,99 @@ async def _poll_backtest(
         except Exception:
             pass
     return None, None
+
+
+def _parse_percent(value: str | None) -> float | None:
+    """Parse percentage string like '12.5%' to float 0.125."""
+    if not value or value == "N/A":
+        return None
+    try:
+        # Remove % and convert
+        cleaned = str(value).replace("%", "").replace(",", "").strip()
+        return float(cleaned) / 100
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_decimal(value: str | None) -> float | None:
+    """Parse decimal string to float."""
+    if not value or value == "N/A":
+        return None
+    try:
+        cleaned = str(value).replace(",", "").strip()
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_int(value: str | None) -> int | None:
+    """Parse int string to int."""
+    if not value or value == "N/A":
+        return None
+    try:
+        cleaned = str(value).replace(",", "").strip()
+        return int(float(cleaned))
+    except (ValueError, TypeError):
+        return None
+
+
+async def _save_code_version(
+    backtest_name: str,
+    backtest_id: str,
+    compile_id: str,
+    code: str,
+    stats: dict,
+    status: str = "completed",
+    error_message: str | None = None,
+) -> dict | None:
+    """Save a code version to the database after backtest.
+
+    Args:
+        backtest_name: Name of the backtest
+        backtest_id: QC backtest ID
+        compile_id: QC compile ID
+        code: Full code content
+        stats: Backtest statistics from QC
+        status: "completed", "failed", or "error"
+        error_message: Error message if failed
+
+    Returns:
+        The inserted code_version record or None on error
+    """
+    project_db_id = get_project_db_id()
+    qc_project_id = get_qc_project_id()
+
+    if not project_db_id:
+        return None
+
+    try:
+        client = SupabaseClient(use_service_role=True)
+
+        # Parse statistics
+        record = {
+            "project_id": int(project_db_id),
+            "qc_project_id": qc_project_id,
+            "compile_id": compile_id,
+            "backtest_id": backtest_id,
+            "backtest_name": backtest_name,
+            "name": backtest_name,
+            "code": code,
+            "backtest_status": status,
+            "error_message": error_message,
+            # Metrics
+            "total_return": _parse_percent(stats.get("Net Profit")),
+            "sharpe_ratio": _parse_decimal(stats.get("Sharpe Ratio")),
+            "max_drawdown": _parse_percent(stats.get("Drawdown")),
+            "win_rate": _parse_percent(stats.get("Win Rate")),
+            "total_trades": _parse_int(stats.get("Total Trades")),
+        }
+
+        result = await client.insert("code_versions", record)
+        return result[0] if result else None
+
+    except Exception:
+        # Don't fail the backtest if saving fails
+        return None
 
 
 @tool
@@ -285,12 +383,26 @@ async def update_and_run_backtest(
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
+
+            # Save code version to database
+            saved_version = await _save_code_version(
+                backtest_name=backtest_name,
+                backtest_id=backtest_id,
+                compile_id=compile_id,
+                code=file_content,
+                stats=stats,
+                status="completed",
+            )
+
             return json.dumps(
                 {
                     "success": True,
                     "file_updated": file_name,
                     "backtest_id": backtest_id,
                     "completed": True,
+                    "code_version_id": saved_version.get("id")
+                    if saved_version
+                    else None,
                     "statistics": {
                         "net_profit": stats.get("Net Profit", "N/A"),
                         "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
@@ -405,6 +517,17 @@ async def edit_and_run_backtest(
 
         if backtest_result:
             stats = backtest_result.get("statistics", {})
+
+            # Save code version to database
+            saved_version = await _save_code_version(
+                backtest_name=backtest_name,
+                backtest_id=backtest_id,
+                compile_id=compile_id,
+                code=updated_content,
+                stats=stats,
+                status="completed",
+            )
+
             return json.dumps(
                 {
                     "success": True,
@@ -412,6 +535,9 @@ async def edit_and_run_backtest(
                     "edits_applied": len(edits),
                     "backtest_id": backtest_id,
                     "completed": True,
+                    "code_version_id": saved_version.get("id")
+                    if saved_version
+                    else None,
                     "statistics": {
                         "net_profit": stats.get("Net Profit", "N/A"),
                         "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),

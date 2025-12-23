@@ -58,7 +58,8 @@ async def get_code_versions(page: int = 1, page_size: int = 10) -> str:
                 {"error": True, "message": "Project database ID not found."}
             )
 
-        client = SupabaseClient()
+        # Use service role key for internal DB access
+        client = SupabaseClient(use_service_role=True)
         all_versions = await client.select(
             "code_versions",
             {
@@ -130,7 +131,8 @@ async def get_code_version(version_id: int) -> str:
         if not version_id:
             return json.dumps({"error": True, "message": "version_id is required."})
 
-        client = SupabaseClient()
+        # Use service role key for internal DB access
+        client = SupabaseClient(use_service_role=True)
         data = await client.select(
             "code_versions",
             {"select": "*", "id": f"eq.{version_id}", "limit": "1"},
