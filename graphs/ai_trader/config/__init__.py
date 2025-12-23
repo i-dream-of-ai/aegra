@@ -31,7 +31,7 @@ def load_prompt(name: str) -> dict[str, Any]:
         The parsed JSON content
     """
     path = _PROMPTS_DIR / f"{name}.json"
-    with open(path) as f:
+    with path.open() as f:
         return json.load(f)
 
 

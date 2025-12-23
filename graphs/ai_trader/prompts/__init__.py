@@ -32,7 +32,7 @@ def load_prompt(name: str) -> str:
         KeyError: If the prompt key is missing in the JSON
     """
     path = _PROMPTS_DIR / f"{name}.json"
-    with open(path) as f:
+    with path.open() as f:
         data = json.load(f)
     return data["prompt"]
 
@@ -47,7 +47,7 @@ def load_prompt_json(name: str) -> dict:
         The full JSON dict
     """
     path = _PROMPTS_DIR / f"{name}.json"
-    with open(path) as f:
+    with path.open() as f:
         return json.load(f)
 
 
