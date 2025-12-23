@@ -2,10 +2,13 @@
 
 Pattern from official LangChain docs:
 https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs
+
+Key quote: "The example below assumes only the handoff tool was called
+(no parallel tool calls)"
 """
 
 from langchain.tools import ToolRuntime, tool
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 
@@ -20,12 +23,10 @@ def request_code_review(runtime: ToolRuntime) -> Command:
 
     This hands off the conversation to the reviewer agent.
     """
-    # Per docs: get the last AI message to pass to the next agent
-    last_ai_message = next(
-        (msg for msg in reversed(runtime.state["messages"]) if isinstance(msg, AIMessage)),
-        None,
-    )
-    # Per docs: create a ToolMessage with the tool_call_id
+    # Per docs: Get the AI message that triggered this handoff (the last message)
+    last_ai_message = runtime.state["messages"][-1]
+
+    # Per docs: Create an artificial tool response to complete the pair
     transfer_message = ToolMessage(
         content="Transferred to Doubtful Deacon for code review",
         tool_call_id=runtime.tool_call_id,
@@ -34,7 +35,8 @@ def request_code_review(runtime: ToolRuntime) -> Command:
         goto="reviewer",
         update={
             "active_agent": "reviewer",
-            "messages": [last_ai_message, transfer_message] if last_ai_message else [transfer_message],
+            # Pass only these two messages, not the full subagent history
+            "messages": [last_ai_message, transfer_message],
         },
         graph=Command.PARENT,
     )
@@ -48,12 +50,10 @@ def transfer_to_main_agent(runtime: ToolRuntime) -> Command:
     Use this after completing your code review to hand control back
     to the main agent for further implementation or conversation.
     """
-    # Per docs: get the last AI message to pass to the next agent
-    last_ai_message = next(
-        (msg for msg in reversed(runtime.state["messages"]) if isinstance(msg, AIMessage)),
-        None,
-    )
-    # Per docs: create a ToolMessage with the tool_call_id
+    # Per docs: Get the AI message that triggered this handoff (the last message)
+    last_ai_message = runtime.state["messages"][-1]
+
+    # Per docs: Create an artificial tool response to complete the pair
     transfer_message = ToolMessage(
         content="Transferred back to Shooby Dooby",
         tool_call_id=runtime.tool_call_id,
@@ -62,7 +62,8 @@ def transfer_to_main_agent(runtime: ToolRuntime) -> Command:
         goto="main_agent",
         update={
             "active_agent": "main_agent",
-            "messages": [last_ai_message, transfer_message] if last_ai_message else [transfer_message],
+            # Pass only these two messages, not the full subagent history
+            "messages": [last_ai_message, transfer_message],
         },
         graph=Command.PARENT,
     )
