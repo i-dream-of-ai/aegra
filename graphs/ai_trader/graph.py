@@ -415,16 +415,16 @@ reviewer_agent = create_agent(
 # =============================================================================
 
 
-def call_main_agent(state: AITraderState):
+async def call_main_agent(state: AITraderState):
     """Node that invokes the main agent."""
     logger.info("Calling main agent (Shooby Dooby)")
-    return main_agent.invoke(state)
+    return await main_agent.ainvoke(state)
 
 
-def call_reviewer_agent(state: AITraderState):
+async def call_reviewer_agent(state: AITraderState):
     """Node that invokes the reviewer agent."""
     logger.info("Calling reviewer agent (Doubtful Deacon)")
-    return reviewer_agent.invoke(state)
+    return await reviewer_agent.ainvoke(state)
 
 
 # =============================================================================
