@@ -125,7 +125,9 @@ def _patch_dangling_tool_calls(messages: list) -> list:
 
                 if not has_result:
                     tool_name = tc.get("name", "unknown")
-                    logger.warning("Patching dangling tool call", tool_call_id=tool_call_id)
+                    logger.warning(
+                        "Patching dangling tool call", tool_call_id=tool_call_id
+                    )
                     patched.append(
                         ToolMessage(
                             content=f"Tool {tool_name} was cancelled.",
