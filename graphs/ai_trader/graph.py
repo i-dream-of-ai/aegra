@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 import os
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import structlog
 from langchain_anthropic import ChatAnthropic
@@ -32,7 +32,9 @@ from ai_trader.state import InputState, State
 from ai_trader.subconscious.middleware import (
     SubconsciousMiddleware as SubconsciousProcessor,
 )
-from ai_trader.subconscious.types import SubconsciousEvent
+
+if TYPE_CHECKING:
+    from ai_trader.subconscious.types import SubconsciousEvent
 
 # Import all tools
 from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
@@ -204,7 +206,7 @@ async def call_model(state: State, runtime: Runtime[Context]) -> dict:
 
     # Call model
     response = cast(
-        AIMessage,
+        "AIMessage",
         await model.ainvoke([{"role": "system", "content": system_prompt}, *messages]),
     )
 
@@ -245,7 +247,7 @@ async def call_reviewer(state: State, runtime: Runtime[Context]) -> dict:  # noq
     logger.info("Calling reviewer model", message_count=len(messages))
 
     response = cast(
-        AIMessage,
+        "AIMessage",
         await model.ainvoke([{"role": "system", "content": system_prompt}, *messages]),
     )
 
