@@ -1,7 +1,6 @@
 """Code review tools - handoffs between main agent and reviewer subgraph."""
 
 from langchain.tools import ToolRuntime, tool
-from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 
@@ -16,19 +15,11 @@ def request_code_review(runtime: ToolRuntime) -> Command:
 
     This hands off the conversation to the reviewer agent.
     """
-    # Create the tool result message for this handoff
-    # The agents share state so the reviewer sees the full conversation
-    transfer_message = ToolMessage(
-        content="Transferred to Doubtful Deacon for code review. Please review the conversation and provide feedback.",
-        tool_call_id=runtime.tool_call_id,
-    )
-
+    # Return Command to route to reviewer - the framework auto-creates ToolMessage
+    # Don't manually add messages - that breaks tool_use/tool_result pairing
     return Command(
         goto="reviewer",
-        update={
-            "active_agent": "reviewer",
-            "messages": [transfer_message],
-        },
+        update={"active_agent": "reviewer"},
         graph=Command.PARENT,
     )
 
@@ -41,18 +32,10 @@ def transfer_to_main_agent(runtime: ToolRuntime) -> Command:
     Use this after completing your code review to hand control back
     to the main agent for further implementation or conversation.
     """
-    # Create the tool result message for this handoff
-    transfer_message = ToolMessage(
-        content="Transferred back to Shooby Dooby. Review complete.",
-        tool_call_id=runtime.tool_call_id,
-    )
-
+    # Return Command to route back - framework handles ToolMessage automatically
     return Command(
         goto="main_agent",
-        update={
-            "active_agent": "main_agent",
-            "messages": [transfer_message],
-        },
+        update={"active_agent": "main_agent"},
         graph=Command.PARENT,
     )
 
