@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from typing import Any, Literal, NotRequired
+from typing import Any, Literal
 
 import structlog
 from langchain.agents import AgentState, create_agent
@@ -88,8 +88,8 @@ class AITraderState(AgentState):
     # Subconscious injection context (populated by SubconsciousMiddleware)
     subconscious_context: str | None = None
 
-    # Track which agent is active for routing
-    active_agent: NotRequired[str]
+    # Track which agent is active for routing (None = default to main_agent)
+    active_agent: str | None = None
 
 
 # =============================================================================
