@@ -1,7 +1,7 @@
 """Code review tools - handoffs between main agent and reviewer subgraph."""
 
 from langchain.tools import ToolRuntime, tool
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 
@@ -16,32 +16,18 @@ def request_code_review(runtime: ToolRuntime) -> Command:
 
     This hands off the conversation to the reviewer agent.
     """
-    # Get the last AI message to include in handoff (per docs pattern)
-    last_ai_message = next(
-        (
-            msg
-            for msg in reversed(runtime.state["messages"])
-            if isinstance(msg, AIMessage)
-        ),
-        None,
-    )
-
-    # Create a tool message for the handoff
+    # Create the tool result message for this handoff
+    # The agents share state so the reviewer sees the full conversation
     transfer_message = ToolMessage(
-        content="Transferred to Doubtful Deacon for code review",
+        content="Transferred to Doubtful Deacon for code review. Please review the conversation and provide feedback.",
         tool_call_id=runtime.tool_call_id,
-    )
-
-    # Build messages to pass - include last AI message and transfer message
-    messages_to_pass = (
-        [last_ai_message, transfer_message] if last_ai_message else [transfer_message]
     )
 
     return Command(
         goto="reviewer",
         update={
             "active_agent": "reviewer",
-            "messages": messages_to_pass,
+            "messages": [transfer_message],
         },
         graph=Command.PARENT,
     )
@@ -55,32 +41,17 @@ def transfer_to_main_agent(runtime: ToolRuntime) -> Command:
     Use this after completing your code review to hand control back
     to the main agent for further implementation or conversation.
     """
-    # Get the last AI message to include in handoff (per docs pattern)
-    last_ai_message = next(
-        (
-            msg
-            for msg in reversed(runtime.state["messages"])
-            if isinstance(msg, AIMessage)
-        ),
-        None,
-    )
-
-    # Create a tool message for the handoff
+    # Create the tool result message for this handoff
     transfer_message = ToolMessage(
-        content="Transferred back to Shooby Dooby",
+        content="Transferred back to Shooby Dooby. Review complete.",
         tool_call_id=runtime.tool_call_id,
-    )
-
-    # Build messages to pass - include last AI message and transfer message
-    messages_to_pass = (
-        [last_ai_message, transfer_message] if last_ai_message else [transfer_message]
     )
 
     return Command(
         goto="main_agent",
         update={
             "active_agent": "main_agent",
-            "messages": messages_to_pass,
+            "messages": [transfer_message],
         },
         graph=Command.PARENT,
     )
