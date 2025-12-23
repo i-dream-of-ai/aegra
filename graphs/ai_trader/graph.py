@@ -45,6 +45,7 @@ from ai_trader.tools.files import TOOLS as FILES_TOOLS
 from ai_trader.tools.misc import TOOLS as MISC_TOOLS
 from ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
 from ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
+from ai_trader.tools.review import TOOLS as REVIEW_TOOLS
 
 logger = structlog.getLogger(__name__)
 
@@ -58,6 +59,7 @@ ALL_TOOLS = (
     + OBJECT_STORE_TOOLS
     + AI_SERVICES_TOOLS
     + MISC_TOOLS
+    + REVIEW_TOOLS
 )
 
 
