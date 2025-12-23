@@ -78,7 +78,7 @@ and provide critique on bugs, QuantConnect pitfalls, and potential improvements.
 The reviewer has access to read files, check backtest results, compile code,
 and search the algorithm knowledge base.""",
 )
-def request_code_review(code_summary: str) -> str:
+async def request_code_review(code_summary: str) -> str:
     """
     Request a code review from the reviewer subagent.
 
@@ -92,8 +92,8 @@ def request_code_review(code_summary: str) -> str:
     """
     agent = _get_reviewer_agent()
 
-    # Invoke the reviewer agent (subagents are stateless per invocation)
-    result = agent.invoke({"messages": [{"role": "user", "content": code_summary}]})
+    # Invoke the reviewer agent asynchronously (subagents are stateless per invocation)
+    result = await agent.ainvoke({"messages": [{"role": "user", "content": code_summary}]})
 
     # Get the final message content from the result
     messages = result.get("messages", [])
