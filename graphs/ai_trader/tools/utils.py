@@ -1,6 +1,7 @@
 """Shared utility functions for tools."""
 
 import json
+
 from langchain_core.runnables import RunnableConfig
 
 
