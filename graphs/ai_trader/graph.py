@@ -108,7 +108,7 @@ def _get_model(ctx: dict):
 def _patch_dangling_tool_calls(messages: list) -> list:
     """
     Patch any dangling tool calls.
-    
+
     Ensures strict tool_call -> tool_result ordering.
     If a tool result exists but is separated from its call, it moves it to be immediately after.
     If a tool result is missing, it inserts a cancellation message.
@@ -119,32 +119,32 @@ def _patch_dangling_tool_calls(messages: list) -> list:
     patched = []
     # Map of tool_call_id -> result message
     tool_results = {
-        m.tool_call_id: m 
-        for m in messages 
+        m.tool_call_id: m
+        for m in messages
         if getattr(m, "type", None) == "tool" and getattr(m, "tool_call_id", None)
     }
-    
+
     # Used tool results (to track orphans)
     used_results = set()
 
     i = 0
     while i < len(messages):
         msg = messages[i]
-        
+
         # Skip tool messages (we'll insert them where needed)
         if getattr(msg, "type", None) == "tool":
             i += 1
             continue
-            
+
         patched.append(msg)
-        
+
         # If this message has tool calls, process them
         if getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 tool_call_id = tc.get("id")
                 if not tool_call_id:
                     continue
-                
+
                 if tool_call_id in tool_results:
                     # Append the actual result
                     patched.append(tool_results[tool_call_id])
@@ -152,7 +152,9 @@ def _patch_dangling_tool_calls(messages: list) -> list:
                 else:
                     # Missing result - insert placeholder
                     tool_name = tc.get("name", "unknown")
-                    logger.warning("Patching dangling tool call", tool_call_id=tool_call_id)
+                    logger.warning(
+                        "Patching dangling tool call", tool_call_id=tool_call_id
+                    )
                     patched.append(
                         ToolMessage(
                             content=f"Tool {tool_name} was interrupted/cancelled.",
@@ -161,11 +163,11 @@ def _patch_dangling_tool_calls(messages: list) -> list:
                         )
                     )
         i += 1
-        
+
     # Technically we should discard orphan tool results (those not in used_results)
     # as they would cause BadRequestError if sent without a parent call.
     # The loop above effectively reconstructs the list without orphans.
-        
+
     return patched
 
 

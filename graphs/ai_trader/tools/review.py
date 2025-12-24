@@ -78,9 +78,9 @@ async def request_code_review(review_request: str) -> str:
     agent = _create_reviewer_agent()
 
     # Invoke with fresh message list - no shared history
-    result = await agent.ainvoke({
-        "messages": [{"role": "user", "content": review_request}]
-    })
+    result = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": review_request}]}
+    )
 
     # Extract only the final message content
     messages = result.get("messages", [])
