@@ -14,12 +14,7 @@ from ai_trader.supabase_client import (
 )
 
 
-def _get_qc_project_id():
-    """Get QC project ID from LangGraph config."""
-    from langgraph.config import get_config
-
-    config = get_config()
-    return config.get("configurable", {}).get("qc_project_id")
+from ai_trader.tools.utils import get_qc_project_id, format_error, format_success
 
 
 async def _poll_compile(
@@ -175,22 +170,19 @@ async def compile_and_backtest(backtest_name: str) -> str:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return format_error("No project context.")
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
         compile_id = compile_data.get("compileId")
         if not compile_id:
-            return json.dumps({"error": True, "message": "No compile ID returned."})
+            return format_error("No compile ID returned.")
 
         is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
         if not is_compiled:
-            return json.dumps(
-                {
-                    "error": True,
-                    "compile_id": compile_id,
-                    "message": f"Compilation failed: {compile_error}",
-                }
+            return format_error(
+                f"Compilation failed: {compile_error}",
+                {"compile_id": compile_id}
             )
 
         # Backtest
@@ -208,18 +200,17 @@ async def compile_and_backtest(backtest_name: str) -> str:
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        return json.dumps(
+        return format_success(
+            f"Backtest created! Use read_backtest with ID: {backtest_id}", 
             {
-                "success": True,
                 "compile_id": compile_id,
                 "backtest_id": backtest_id,
                 "backtest_name": backtest_name,
-                "message": f"Backtest created! Use read_backtest with ID: {backtest_id}",
             }
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
+        return format_error(f"Unexpected error: {str(e)}")
 
 
 @tool
@@ -249,15 +240,10 @@ async def compile_and_optimize(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"error": True, "message": "No project context."})
+            return format_error("No project context.")
 
         if len(parameters) > 3:
-            return json.dumps(
-                {
-                    "error": True,
-                    "message": "QC limits optimizations to 3 parameters max.",
-                }
-            )
+            return format_error("QC limits optimizations to 3 parameters max.")
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
@@ -438,7 +424,7 @@ async def edit_and_run_backtest(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"success": False, "error": "No project context."})
+             return format_error("No project context.")
 
         # Read current file
         files_data = await qc_request(
@@ -446,9 +432,8 @@ async def edit_and_run_backtest(
         )
         files = files_data.get("files", [])
         if not files:
-            return json.dumps(
-                {"success": False, "error": f"File '{file_name}' not found"}
-            )
+            return format_error(f"File '{file_name}' not found")
+
         current_content = (
             files[0].get("content", "")
             if isinstance(files, list)
@@ -460,18 +445,44 @@ async def edit_and_run_backtest(
         for i, edit in enumerate(edits):
             old_content = edit.get("old_content", "")
             new_content = edit.get("new_content", "")
+            
             if not old_content:
-                return json.dumps(
-                    {"success": False, "error": f"Edit {i + 1}: old_content required"}
+                return format_error(f"Edit {i + 1}: old_content required")
+
+            # Robust matching with whitespace stripping
+            old_stripped = old_content.strip()
+            occurrences = updated_content.count(old_content)
+            
+            # If explicit match fails, try fuzzy match on stripped usage
+            if occurrences == 0 and old_stripped:
+                if updated_content.strip() == old_stripped:
+                    # Whole file match
+                    updated_content = new_content
+                    continue
+                else:
+                     # Try regex for whitespace-insensitive match
+                    import re
+                    escaped_old = re.escape(old_stripped)
+                    # Allow variable whitespace
+                    pattern = re.sub(r"\s+", r"\\s+", escaped_old)
+                    matches = list(re.finditer(pattern, updated_content))
+                    
+                    if len(matches) == 1:
+                        match = matches[0]
+                        updated_content = updated_content[:match.start()] + new_content + updated_content[match.end():]
+                        continue
+                    elif len(matches) > 1:
+                         return format_error(f"Edit {i + 1}: old_content appears {len(matches)} times (fuzzy match). Must be unique.")
+
+            if occurrences == 0:
+                return format_error(
+                    f"Edit {i + 1}: old_content not found in file",
+                    {"hint": "Use read_file to check content. Whitespace matters."}
                 )
-            if updated_content.count(old_content) == 0:
-                return json.dumps(
-                    {"success": False, "error": f"Edit {i + 1}: old_content not found"}
-                )
-            if updated_content.count(old_content) > 1:
-                return json.dumps(
-                    {"success": False, "error": f"Edit {i + 1}: old_content not unique"}
-                )
+                
+            if occurrences > 1:
+                 return format_error(f"Edit {i + 1}: old_content not unique ({occurrences} found)")
+
             updated_content = updated_content.replace(old_content, new_content)
 
         # Update file

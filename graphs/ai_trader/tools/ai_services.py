@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 
 from ai_trader.qc_api import qc_request
 from ai_trader.supabase_client import SupabaseClient
+from ai_trader.tools.utils import format_error, format_success
 
 
 @tool
@@ -31,9 +32,7 @@ async def check_initialization_errors(code: str, file_name: str = "main.py") -> 
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps(
-            {"error": True, "message": f"Failed to check initialization errors: {e!s}"}
-        )
+        return format_error(f"Failed to check initialization errors: {str(e)}")
 
 
 @tool
@@ -57,9 +56,7 @@ async def complete_code(sentence: str, response_limit: int = 10) -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps(
-            {"error": True, "message": f"Failed to get code completion: {e!s}"}
-        )
+        return format_error(f"Failed to get code completion: {str(e)}")
 
 
 @tool
@@ -86,9 +83,7 @@ async def enhance_error_message(error_message: str, stacktrace: str = None) -> s
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps(
-            {"error": True, "message": f"Failed to enhance error message: {e!s}"}
-        )
+        return format_error(f"Failed to enhance error message: {str(e)}")
 
 
 @tool
@@ -111,7 +106,7 @@ async def check_syntax(code: str, file_name: str = "main.py") -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to check syntax: {e!s}"})
+        return format_error(f"Failed to check syntax: {str(e)}")
 
 
 @tool
@@ -133,9 +128,7 @@ async def update_code_to_pep8(code: str, file_name: str = "main.py") -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps(
-            {"error": True, "message": f"Failed to format code to PEP8: {e!s}"}
-        )
+        return format_error(f"Failed to format code to PEP8: {str(e)}")
 
 
 @tool
@@ -161,7 +154,7 @@ async def search_quantconnect(query: str) -> str:
         return json.dumps(data, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to search: {e!s}"})
+        return format_error(f"Failed to search: {str(e)}")
 
 
 async def _generate_embedding(text: str) -> list[float]:
@@ -184,7 +177,7 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
     """
     try:
         if not query:
-            return json.dumps({"error": True, "message": "query is required."})
+            return format_error("query is required.")
 
         embedding = await _generate_embedding(query)
         vector_string = f"[{','.join(str(x) for x in embedding)}]"
@@ -217,7 +210,7 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to search: {e!s}"})
+        return format_error(f"Failed to search: {str(e)}")
 
 
 @tool
@@ -230,7 +223,7 @@ async def get_algorithm_code(algorithm_id: str) -> str:
     """
     try:
         if not algorithm_id:
-            return json.dumps({"error": True, "message": "algorithm_id is required."})
+            return format_error("algorithm_id is required.")
 
         is_uuid = bool(
             re.match(
@@ -249,9 +242,7 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         data = await client.select("algorithm_knowledge_base", params)
 
         if not data:
-            return json.dumps(
-                {"error": True, "message": f"Algorithm not found: {algorithm_id}"}
-            )
+            return format_error(f"Algorithm not found: {algorithm_id}")
 
         algorithm = data[0]
         code = algorithm.get("code", "")
@@ -269,7 +260,7 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Failed to get code: {e!s}"})
+        return format_error(f"Failed to get code: {str(e)}")
 
 
 # Export all tools
