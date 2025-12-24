@@ -5,12 +5,12 @@ import json
 import os
 
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 
 from ai_trader.qc_api import qc_request
 from ai_trader.supabase_client import (
     SupabaseClient,
     get_project_db_id,
-    get_qc_project_id,
 )
 
 
@@ -158,15 +158,16 @@ async def _save_code_version(
 
 
 @tool
-async def compile_and_backtest(backtest_name: str) -> str:
+async def compile_and_backtest(backtest_name: str, config: RunnableConfig) -> str:
     """
     Compile code and create a backtest using default parameter values.
 
     Args:
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
+        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -221,6 +222,7 @@ async def compile_and_optimize(
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
+    config: RunnableConfig = None,
 ) -> str:
     """
     Compile code and create an optimization job. Max 3 parameters.
@@ -233,9 +235,10 @@ async def compile_and_optimize(
         constraints: Optional constraints [{target, operator, targetValue}]
         node_type: Node type ("O2-8", "O4-12", "O8-16")
         parallel_nodes: Number of parallel nodes (default: 4)
+        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -304,7 +307,7 @@ async def compile_and_optimize(
 
 @tool
 async def update_and_run_backtest(
-    file_name: str, file_content: str, backtest_name: str
+    file_name: str, file_content: str, backtest_name: str, config: RunnableConfig
 ) -> str:
     """
     Update file with COMPLETE new content, compile, and run backtest.
@@ -313,9 +316,10 @@ async def update_and_run_backtest(
         file_name: Name of the file to update (e.g., "main.py")
         file_content: Complete new contents of the file
         backtest_name: Format: "[Symbols] [Strategy Type]"
+        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -408,7 +412,7 @@ async def update_and_run_backtest(
 
 @tool
 async def edit_and_run_backtest(
-    file_name: str, edits: list[dict], backtest_name: str
+    file_name: str, edits: list[dict], backtest_name: str, config: RunnableConfig
 ) -> str:
     """
     Edit file using search-and-replace, then compile and run backtest.
@@ -417,9 +421,10 @@ async def edit_and_run_backtest(
         file_name: Name of the file to edit
         edits: List of edits, each with old_content and new_content
         backtest_name: Format: "[Symbols] [Strategy Type]"
+        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = get_qc_project_id(config)
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
