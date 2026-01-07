@@ -10,14 +10,17 @@ Middleware patterns:
 - @dynamic_prompt: Dynamic system prompt with subconscious injection
 - @wrap_model_call: Dynamic model selection from context
 - SummarizationMiddleware: Built-in context window management
+- Generative UI via push_ui_message for custom components
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import time
+import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Annotated, Any, Callable, Sequence
 
 import structlog
 from langchain.agents import create_agent
@@ -35,7 +38,7 @@ from langchain.agents.middleware import (
 from langchain.chat_models import init_chat_model
 from langchain.messages import SystemMessage
 from langchain_core.messages import ToolMessage
-from langgraph.config import get_stream_writer
+from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
 from langgraph.runtime import Runtime
 
 from ai_trader.context import Context
@@ -80,9 +83,11 @@ ALL_TOOLS = (
 
 
 class AITraderState(AgentState):
-    """Extended agent state with subconscious context."""
+    """Extended agent state with subconscious context and generative UI."""
     subconscious_context: str | None = None
     request_review: bool = False
+    # Generative UI messages - rendered by frontend via ui-registry
+    ui: Annotated[Sequence[AnyUIMessage], ui_message_reducer] = []
 
 
 # =============================================================================
@@ -159,7 +164,7 @@ def build_system_prompt(state: AITraderState, runtime: Runtime) -> str:
 
 @before_model
 def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
-    """Inject subconscious context before model call."""
+    """Inject subconscious context before model call using Generative UI."""
     ctx = runtime.context or {}
     
     if not ctx.get("subconscious_enabled", True):
@@ -170,52 +175,36 @@ def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any
         return None
     
     try:
-        writer = get_stream_writer()
-        import uuid
-        import time
         start_time = time.time()
-        
-        # Generate a unique ID for this UI message
-        ui_message_id = str(uuid.uuid4())
 
         def emit_event(event: "SubconsciousEvent"):
-            """Emit events as proper UIMessage format for SubconsciousPanel."""
+            """Emit events via push_ui_message for SubconsciousPanel."""
             if event.type == "instinct_injection":
                 # Final injection - push complete UI message with all data
                 data = event.data or {}
                 duration_ms = int((time.time() - start_time) * 1000)
-                writer({
-                    "type": "ui",
-                    "ui": {
-                        "id": ui_message_id,
-                        "name": "subconscious-panel",
-                        "props": {
-                            "stage": "done",
-                            "userIntent": data.get("userIntent"),
-                            "skills": data.get("skills", []),
-                            "content": data.get("content"),
-                            "tokenCount": data.get("tokenCount", 0),
-                            "synthesisMethod": data.get("synthesisMethod", "unknown"),
-                            "durationMs": duration_ms,
-                            # Legacy support
-                            "skillIds": data.get("skillIds", []),
-                            "instinctSkills": data.get("instinctSkills", []),
-                            "contextualSkills": data.get("contextualSkills", []),
-                        },
+                push_ui_message(
+                    "subconscious-panel",
+                    {
+                        "stage": "done",
+                        "userIntent": data.get("userIntent"),
+                        "skills": data.get("skills", []),
+                        "content": data.get("content"),
+                        "tokenCount": data.get("tokenCount", 0),
+                        "synthesisMethod": data.get("synthesisMethod", "unknown"),
+                        "durationMs": duration_ms,
+                        # Legacy support
+                        "skillIds": data.get("skillIds", []),
+                        "instinctSkills": data.get("instinctSkills", []),
+                        "contextualSkills": data.get("contextualSkills", []),
                     },
-                })
+                )
             else:
                 # Progress events - push UI message with current stage
-                writer({
-                    "type": "ui",
-                    "ui": {
-                        "id": ui_message_id,
-                        "name": "subconscious-panel",
-                        "props": {
-                            "stage": event.stage,
-                        },
-                    },
-                })
+                push_ui_message(
+                    "subconscious-panel",
+                    {"stage": event.stage},
+                )
 
         processor = SubconsciousProcessor(on_event=emit_event)
 
@@ -236,16 +225,8 @@ def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any
     except Exception as e:
         logger.warning("Subconscious injection failed", error=str(e))
         with contextlib.suppress(Exception):
-            writer = get_stream_writer()
             # Emit failure state as UI message
-            writer({
-                "type": "ui",
-                "ui": {
-                    "id": str(uuid.uuid4()),
-                    "name": "subconscious-panel",
-                    "props": {"stage": "done"},
-                },
-            })
+            push_ui_message("subconscious-panel", {"stage": "done"})
     
     return None
 
