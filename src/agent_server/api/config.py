@@ -39,6 +39,7 @@ MODEL_MAX_TOKENS = {
     "gpt-5": 100000,
     "gpt-5-mini": 32000,
     "gpt-5-nano": 16000,
+    "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q": 16000,
 }
 
 MODEL_CONFIGS = {
@@ -133,6 +134,16 @@ MODEL_CONFIGS = {
         "timeout": 30000,
         "maxRetries": 2,
     },
+    # Fine-tuned model for financial/quant code review
+    "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q": {
+        "maxTokens": 8000,
+        "thinkingBudget": None,
+        "hardLimit": 16000,
+        "reasoningEffort": "none",
+        "verbosity": "medium",
+        "timeout": 60000,
+        "maxRetries": 3,
+    },
 }
 
 # =============================================================================
@@ -171,7 +182,7 @@ Main agent will:
         "description": """Expert quant algo dev focused on high yield. Challenge and validate code assessments. Look for overcomplexity, bugs, edge cases, best practices, risk management, and profitability blockers.
 Agree where appropriate, disagree with evidence where needed.
 Has access to algorithm search tools for finding best practice examples.""",
-        "model": "gpt-5.2",
+        "model": "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q",
         "maxTokens": 50000,
         "thinkingBudget": None,
         "reasoningEffort": "high",
