@@ -134,27 +134,29 @@ async def dynamic_model_selection(
 @dynamic_prompt
 def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
     """Build system prompt with timestamp and subconscious context."""
-    # Defensive argument handling to support varying middleware signatures
+    # Defensive logic: Check if first arg is ModelRequest (has runtime) or State (dict)
     ctx = {}
-    
-    # Check positional args (usually runtime or config)
     if args:
         arg0 = args[0]
-        if hasattr(arg0, "context"):
-            ctx = arg0.context or {}
-        elif isinstance(arg0, dict):
-            # Might be RunnableConfig
-            ctx = arg0.get("configurable", {})
+        # Case 1: ModelRequest (Middleware usage)
+        if hasattr(arg0, "runtime") and hasattr(arg0.runtime, "context"):
+            ctx = arg0.runtime.context or {}
+        # Case 2: Dict/State (Direct usage)
         elif hasattr(arg0, "get"):
-             # Some other dict-like object
-             ctx = arg0.get("configurable", {}) or {}
+            ctx = arg0
+        # Case 3: Runtime object directly
+        elif hasattr(arg0, "context"):
+            ctx = arg0.context or {}
+        # Case 4: RunnableConfig
+        elif isinstance(arg0, dict) and "configurable" in arg0:
+            ctx = arg0.get("configurable", {})
 
-    # Check kwargs if needed (rare for this middleware pattern)
+    # Fallback to kwargs if needed
     if not ctx and "config" in kwargs:
-        cfg = kwargs["config"]
-        ctx = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
+         cfg = kwargs["config"]
+         ctx = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
 
-    # Get base prompt from context or default
+    # Get base prompt
     base_prompt = ctx.get("system_prompt") or DEFAULT_MAIN_PROMPT
     
     logger.info(
