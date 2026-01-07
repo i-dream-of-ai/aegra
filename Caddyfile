@@ -1,3 +1,0 @@
-api.ledgai.com {
-    reverse_proxy aegra:8000
-}
