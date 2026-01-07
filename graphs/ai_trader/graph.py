@@ -97,7 +97,7 @@ class AITraderState(AgentState):
 
 
 @wrap_model_call
-def dynamic_model_selection(
+async def dynamic_model_selection(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
@@ -123,7 +123,7 @@ def dynamic_model_selection(
             model = model.bind(reasoning_effort=reasoning_effort)
     
     logger.info("Dynamic model selection", model=model_name)
-    return handler(request.override(model=model))
+    return await handler(request.override(model=model))
 
 
 # =============================================================================
