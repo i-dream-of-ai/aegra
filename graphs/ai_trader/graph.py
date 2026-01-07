@@ -171,7 +171,7 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
     prompt = base_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
     
     # Add subconscious context if available
-    subconscious = state.get("subconscious_context")
+    subconscious = ctx.get("subconscious_context")
     if subconscious:
         prompt += f"\n\n<injected_context>\n{subconscious}\n</injected_context>"
     
