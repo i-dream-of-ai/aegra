@@ -742,8 +742,9 @@ async def get_thread_history_post(
             "before": before,
         }
         # The runtime may expect metadata filter under "filter" or "metadata"; try "metadata"
+        # LangGraph expects metadata filter under "filter"
         if metadata is not None:
-            kwargs["metadata"] = metadata  # type: ignore[index]
+            kwargs["filter"] = metadata  # type: ignore[index]
 
         # Some LangGraph versions support subgraphs flag; pass if available
         try:
