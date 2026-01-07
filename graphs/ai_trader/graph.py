@@ -217,8 +217,18 @@ async def call_model(state: State, runtime: Runtime[Context]) -> dict:
     # Get model based on context
     model = _get_model(ctx).bind_tools(ALL_TOOLS)
 
-    # Build system prompt
-    system_prompt = ctx.get("system_prompt") or DEFAULT_MAIN_PROMPT
+    # Build system prompt - DEBUG: log which source we're using
+    ctx_prompt = ctx.get("system_prompt") if ctx else None
+    system_prompt = ctx_prompt or DEFAULT_MAIN_PROMPT
+    
+    logger.info(
+        "System prompt source",
+        has_ctx=bool(ctx),
+        ctx_has_prompt=bool(ctx_prompt) if ctx else False,
+        using_default=not bool(ctx_prompt),
+        prompt_preview=system_prompt[:100] if system_prompt else "NONE",
+    )
+    
     system_prompt = system_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
 
     # Inject subconscious context
@@ -231,7 +241,7 @@ async def call_model(state: State, runtime: Runtime[Context]) -> dict:
 
     logger.info(
         "Calling main model",
-        model=ctx.get("model"),
+        model=ctx.get("model") if ctx else "default",
         message_count=len(messages),
     )
 
