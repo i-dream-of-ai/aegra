@@ -262,20 +262,46 @@ async def call_model(state: State, runtime: Runtime[Context]) -> dict:
 
 async def call_reviewer(state: State, runtime: Runtime[Context]) -> dict:  # noqa: ARG001
     """Call the reviewer LLM for code critique."""
-    # Reviewer uses Claude without extended thinking
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=8192,
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    )
+    ctx = runtime.context
 
-    system_prompt = DEFAULT_REVIEWER_PROMPT.format(
+    # Get reviewer configuration from context or env
+    # Default to ft:gpt-4.1-mini... if not set but ideally comes from DB
+    reviewer_model = ctx.get("reviewer_model") or os.environ.get(
+        "REVIEWER_MODEL", "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"
+    )
+    
+    # Check if model is Claude or OpenAI based
+    is_claude = reviewer_model.startswith("claude")
+    
+    if is_claude:
+        model = ChatAnthropic(
+            model=reviewer_model,
+            max_tokens=8192,
+            api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        )
+    else:
+        # OpenAI / Finetuned
+        model = ChatOpenAI(
+            model=reviewer_model,
+            max_tokens=16384,
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            # Reviewer usually doesn't need high reasoning effort if it's a finetune,
+            # but we can respect context if passed
+            reasoning_effort=ctx.get("reviewer_reasoning_effort") or None
+        )
+
+    # Use reviewer prompt from context or default
+    system_prompt = (ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT).format(
         system_time=datetime.now(tz=UTC).isoformat()
     )
 
     messages = _patch_dangling_tool_calls(list(state.messages))
 
-    logger.info("Calling reviewer model", message_count=len(messages))
+    logger.info(
+        "Calling reviewer model", 
+        model=reviewer_model,
+        message_count=len(messages)
+    )
 
     response = cast(
         "AIMessage",
