@@ -3,24 +3,18 @@
 import json
 import os
 
-from langchain_core.tools import tool
+from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
 
+from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
-
-
-def _get_qc_project_id():
-    """Get QC project ID from LangGraph config."""
-    from langgraph.config import get_config
-
-    config = get_config()
-    return config.get("configurable", {}).get("qc_project_id")
 
 
 @tool
 async def estimate_optimization(
     compile_id: str,
     parameters: list[dict],
+    runtime: ToolRuntime[Context],
     node_type: str = "O2-8",
     parallel_nodes: int = 6,
 ) -> str:
@@ -34,7 +28,7 @@ async def estimate_optimization(
         parallel_nodes: Number of parallel nodes (default: 6)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -93,6 +87,7 @@ async def create_optimization(
     target: str,
     target_to: str,
     parameters: list[dict],
+    runtime: ToolRuntime[Context],
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
@@ -111,7 +106,7 @@ async def create_optimization(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -202,7 +197,10 @@ async def create_optimization(
 
 @tool
 async def read_optimization(
-    optimization_id: str, page: int = 1, page_size: int = 20
+    optimization_id: str,
+    runtime: ToolRuntime[Context],
+    page: int = 1,
+    page_size: int = 20,
 ) -> str:
     """
     Read optimization status and paginated results.
@@ -213,7 +211,7 @@ async def read_optimization(
         page_size: Results per page (default: 20, max: 50)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -314,7 +312,11 @@ async def read_optimization(
 
 
 @tool
-async def list_optimizations(page: int = 1, page_size: int = 10) -> str:
+async def list_optimizations(
+    runtime: ToolRuntime[Context],
+    page: int = 1,
+    page_size: int = 10,
+) -> str:
     """
     List optimizations for the current project with pagination.
 
@@ -323,7 +325,7 @@ async def list_optimizations(page: int = 1, page_size: int = 10) -> str:
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -373,7 +375,11 @@ async def list_optimizations(page: int = 1, page_size: int = 10) -> str:
 
 
 @tool
-async def update_optimization(optimization_id: str, name: str) -> str:
+async def update_optimization(
+    optimization_id: str,
+    name: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Update the name of an optimization.
 
@@ -382,7 +388,7 @@ async def update_optimization(optimization_id: str, name: str) -> str:
         name: New name
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -411,7 +417,10 @@ async def update_optimization(optimization_id: str, name: str) -> str:
 
 
 @tool
-async def abort_optimization(optimization_id: str) -> str:
+async def abort_optimization(
+    optimization_id: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Abort a running optimization. Completed backtests will be kept.
 
@@ -419,7 +428,7 @@ async def abort_optimization(optimization_id: str) -> str:
         optimization_id: The optimization ID to abort
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -444,7 +453,10 @@ async def abort_optimization(optimization_id: str) -> str:
 
 
 @tool
-async def delete_optimization(optimization_id: str) -> str:
+async def delete_optimization(
+    optimization_id: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Delete an optimization and all its results. This cannot be undone.
 
@@ -452,7 +464,7 @@ async def delete_optimization(optimization_id: str) -> str:
         optimization_id: The optimization ID to delete
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
