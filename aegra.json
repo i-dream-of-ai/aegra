@@ -8,5 +8,8 @@
   },
   "http": {
     "app": "./custom_routes_example.py:app"
+  },
+  "auth": {
+    "path": "./auth.py:auth"
   }
 }
