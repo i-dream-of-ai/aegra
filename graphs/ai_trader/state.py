@@ -67,3 +67,11 @@ class State(InputState):
     When True, routes to the Doubtful Deacon reviewer subgraph.
     Set by the request_code_review tool, cleared after review completes.
     """
+
+    # Running summary for context window management
+    context: dict | None = None
+    """
+    Contains running summary from SummarizationNode.
+    Used to preserve context when conversation history gets too long.
+    Structure: {"running_summary": RunningSummary} when summarization has occurred.
+    """

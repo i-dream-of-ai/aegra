@@ -45,6 +45,7 @@ dependencies = [
     "langfuse>=3.11.1",
     "structlog>=25.5.0",
     "asgi-correlation-id>=4.3.4",
+    "langmem>=0.1.0",
 ]
 
 [project.urls]
