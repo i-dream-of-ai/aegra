@@ -19,4 +19,5 @@ jobs:
             cd /opt/aegra-core
             git pull origin main
             docker compose build --no-cache aegra
-            docker compose up -d aegra
+            docker compose up -d aegra caddy
+
