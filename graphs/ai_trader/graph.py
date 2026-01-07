@@ -167,12 +167,18 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
     """Inject subconscious context before model call using Generative UI."""
     ctx = runtime.context or {}
     
+    logger.info("inject_subconscious called", context_keys=list(ctx.keys()) if ctx else [])
+    
     if not ctx.get("subconscious_enabled", True):
+        logger.info("Subconscious disabled via context flag")
         return None
     
     access_token = ctx.get("access_token")
     if not access_token:
+        logger.warning("Subconscious skipped: no access_token in context")
         return None
+    
+    logger.info("Subconscious processing starting", has_token=bool(access_token))
     
     try:
         start_time = time.time()
@@ -215,11 +221,15 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
             current_turn=0,
         )
         
+        logger.info("Subconscious processing complete", 
+                   has_result=bool(subconscious),
+                   result_length=len(subconscious) if subconscious else 0)
+        
         if subconscious:
             return {"subconscious_context": subconscious}
             
     except Exception as e:
-        logger.warning("Subconscious injection failed", error=str(e))
+        logger.warning("Subconscious injection failed", error=str(e), exc_info=True)
         with contextlib.suppress(Exception):
             # Emit failure state as UI message
             push_ui_message("subconscious-panel", {"stage": "done"})
