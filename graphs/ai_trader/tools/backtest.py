@@ -5,22 +5,20 @@ import json
 import os
 import time
 
-from langchain_core.tools import tool
+from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
 
+from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
 
 
-def _get_qc_project_id():
-    """Get QC project ID from LangGraph config."""
-    from langgraph.config import get_config
-
-    config = get_config()
-    return config.get("configurable", {}).get("qc_project_id")
-
 
 @tool
-async def create_backtest(compile_id: str, backtest_name: str) -> str:
+async def create_backtest(
+    compile_id: str,
+    backtest_name: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Create a backtest on QuantConnect using default parameter values.
 
@@ -29,7 +27,7 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -92,7 +90,10 @@ async def create_backtest(compile_id: str, backtest_name: str) -> str:
 
 
 @tool
-async def read_backtest(backtest_id: str) -> str:
+async def read_backtest(
+    backtest_id: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Read backtest status and key statistics from QuantConnect.
 
@@ -100,7 +101,7 @@ async def read_backtest(backtest_id: str) -> str:
         backtest_id: The backtest ID to read
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -170,7 +171,10 @@ async def read_backtest(backtest_id: str) -> str:
 
 @tool
 async def read_backtest_chart(
-    backtest_id: str, name: str, sample_count: int = 100
+    backtest_id: str,
+    name: str,
+    runtime: ToolRuntime[Context],
+    sample_count: int = 100,
 ) -> str:
     """
     Read chart data from a backtest. Triggers chart generation, polls until ready, returns data.
@@ -186,7 +190,7 @@ async def read_backtest_chart(
         sample_count: Number of data points (default: 100, max: 500)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -293,7 +297,10 @@ async def read_backtest_chart(
 
 @tool
 async def read_backtest_orders(
-    backtest_id: str, page: int = 1, page_size: int = 50
+    backtest_id: str,
+    runtime: ToolRuntime[Context],
+    page: int = 1,
+    page_size: int = 50,
 ) -> str:
     """
     Read paginated order history from a backtest.
@@ -304,7 +311,7 @@ async def read_backtest_orders(
         page_size: Orders per page (default: 50, max: 100)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -347,7 +354,10 @@ async def read_backtest_orders(
 
 @tool
 async def read_backtest_insights(
-    backtest_id: str, start: int = 0, end: int = 100
+    backtest_id: str,
+    runtime: ToolRuntime[Context],
+    start: int = 0,
+    end: int = 100,
 ) -> str:
     """
     Read insights from a backtest.
@@ -358,7 +368,7 @@ async def read_backtest_insights(
         end: End index (default: 100)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -380,7 +390,11 @@ async def read_backtest_insights(
 
 
 @tool
-async def list_backtests(page: int = 1, page_size: int = 10) -> str:
+async def list_backtests(
+    runtime: ToolRuntime[Context],
+    page: int = 1,
+    page_size: int = 10,
+) -> str:
     """
     List backtests for current project with pagination.
 
@@ -389,7 +403,7 @@ async def list_backtests(page: int = 1, page_size: int = 10) -> str:
         page_size: Results per page (default: 10, max: 20)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -444,7 +458,12 @@ async def list_backtests(page: int = 1, page_size: int = 10) -> str:
 
 
 @tool
-async def update_backtest(backtest_id: str, name: str = None, note: str = None) -> str:
+async def update_backtest(
+    backtest_id: str,
+    runtime: ToolRuntime[Context],
+    name: str = None,
+    note: str = None,
+) -> str:
     """
     Update a backtest name and/or note.
 
@@ -454,7 +473,7 @@ async def update_backtest(backtest_id: str, name: str = None, note: str = None) 
         note: Note/description (optional)
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -491,7 +510,10 @@ async def update_backtest(backtest_id: str, name: str = None, note: str = None) 
 
 
 @tool
-async def delete_backtest(backtest_id: str) -> str:
+async def delete_backtest(
+    backtest_id: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Delete a backtest. This action cannot be undone.
 
@@ -499,7 +521,7 @@ async def delete_backtest(backtest_id: str) -> str:
         backtest_id: The backtest ID to delete
     """
     try:
-        qc_project_id = _get_qc_project_id()
+        qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
