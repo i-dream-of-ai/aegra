@@ -20,12 +20,14 @@ from typing import TYPE_CHECKING, Literal, cast
 import structlog
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 from langgraph.types import RetryPolicy
+from langmem.short_term import SummarizationNode
 
 from ai_trader.context import Context
 from ai_trader.prompts import DEFAULT_MAIN_PROMPT, DEFAULT_REVIEWER_PROMPT
@@ -351,12 +353,25 @@ llm_retry_policy = RetryPolicy(
     max_interval=30.0,
 )
 
+# Summarization node - triggers when conversation exceeds token limit
+# Uses a fast model to summarize older messages, preserving context
+summarization_model = ChatOpenAI(model="gpt-4o-mini", max_tokens=4096)
+summarization_node = SummarizationNode(
+    token_counter=count_tokens_approximately,
+    model=summarization_model,
+    max_tokens=100000,  # Trigger summarization at ~100K tokens
+    max_tokens_before_summary=80000,  # Start considering summary at 80K
+    max_summary_tokens=4000,  # Max size of summary itself
+)
+
 # Add nodes with retry policies
+builder.add_node("summarize", summarization_node)
 builder.add_node("call_model", call_model, retry=llm_retry_policy)
 builder.add_node("tools", ToolNode(ALL_TOOLS), retry=llm_retry_policy)
 
-# Edges
-builder.add_edge("__start__", "call_model")
+# Edges: START -> summarize -> call_model -> tools -> call_model
+builder.add_edge(START, "summarize")
+builder.add_edge("summarize", "call_model")
 builder.add_conditional_edges("call_model", route_model_output, ["tools", END])
 builder.add_edge("tools", "call_model")
 
