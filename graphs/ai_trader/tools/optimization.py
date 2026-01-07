@@ -4,6 +4,7 @@ import json
 import os
 
 from langchain_core.tools import tool
+from langgraph.graph.ui import push_ui_message
 
 from ai_trader.qc_api import qc_request
 
@@ -266,6 +267,26 @@ async def read_optimization(
                 "cagr": best_stats.get("Compounding Annual Return"),
                 "sharpe_ratio": best_stats.get("Sharpe Ratio"),
             }
+
+        # Build UI-friendly data structure
+        ui_data = {
+            "optimizationId": optimization_id,
+            "name": opt.get("name", "Unknown"),
+            "status": opt.get("status", "Unknown"),
+            "progress": opt.get("progress", 0),
+            "bestResult": best,
+            "pagination": {
+                "currentPage": page,
+                "pageSize": page_size,
+                "totalResults": total,
+                "totalPages": total_pages,
+                "hasMorePages": page < total_pages,
+            },
+            "results": results,
+        }
+        
+        # Emit optimization results UI component via generative UI
+        push_ui_message("optimization-results", ui_data)
 
         return json.dumps(
             {

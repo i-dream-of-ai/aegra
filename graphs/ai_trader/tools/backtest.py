@@ -6,6 +6,7 @@ import os
 import time
 
 from langchain_core.tools import tool
+from langgraph.graph.ui import push_ui_message
 
 from ai_trader.qc_api import qc_request
 
@@ -114,19 +115,37 @@ async def read_backtest(backtest_id: str) -> str:
             backtest = backtest[0] if backtest else {}
 
         stats = backtest.get("statistics", {}) if isinstance(backtest, dict) else {}
+        
+        # Build UI-friendly data structure
+        ui_data = {
+            "backtestId": backtest_id,
+            "name": backtest.get("name", "Unknown") if isinstance(backtest, dict) else "Unknown",
+            "status": "Completed" if (isinstance(backtest, dict) and backtest.get("completed")) else "Running",
+            "completed": backtest.get("completed", False) if isinstance(backtest, dict) else False,
+            "error": backtest.get("error") if isinstance(backtest, dict) and backtest.get("error") else None,
+            "summary": {
+                "totalReturn": stats.get("Net Profit"),
+                "annualReturn": stats.get("Compounding Annual Return"),
+                "sharpeRatio": stats.get("Sharpe Ratio"),
+                "drawdown": stats.get("Drawdown"),
+                "winRate": stats.get("Win Rate"),
+                "totalTrades": stats.get("Total Trades"),
+                "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
+                "averageWin": stats.get("Average Win"),
+                "averageLoss": stats.get("Average Loss"),
+            },
+        }
+        
+        # Emit UI component via generative UI
+        push_ui_message("backtest-stats", ui_data)
 
+        # Return JSON for LLM context (legacy compatibility)
         return json.dumps(
             {
                 "backtest_id": backtest_id,
-                "name": backtest.get("name", "Unknown")
-                if isinstance(backtest, dict)
-                else "Unknown",
-                "status": "Completed"
-                if (isinstance(backtest, dict) and backtest.get("completed"))
-                else "Running",
-                "completed": backtest.get("completed", False)
-                if isinstance(backtest, dict)
-                else False,
+                "name": ui_data["name"],
+                "status": ui_data["status"],
+                "completed": ui_data["completed"],
                 "statistics": {
                     "net_profit": stats.get("Net Profit", "N/A"),
                     "cagr": stats.get("Compounding Annual Return", "N/A"),
@@ -140,9 +159,7 @@ async def read_backtest(backtest_id: str) -> str:
                     "average_win": stats.get("Average Win", "N/A"),
                     "average_loss": stats.get("Average Loss", "N/A"),
                 },
-                "error": backtest.get("error")
-                if isinstance(backtest, dict) and backtest.get("error")
-                else None,
+                "error": ui_data["error"],
             },
             indent=2,
         )
@@ -234,6 +251,20 @@ async def read_backtest_chart(
                     "unit": series_info.get("unit", ""),
                     "series_type": series_info.get("seriesType", ""),
                 }
+
+        # Build UI data for chart component
+        ui_data = {
+            "projectId": qc_project_id,
+            "backtestId": backtest_id,
+            "chartName": name,
+            "sampleCount": effective_count,
+            "seriesNames": series_names,
+            "seriesSummary": series_summary,
+            "series": series,
+        }
+        
+        # Emit chart UI component via generative UI
+        push_ui_message("chart", ui_data)
 
         return json.dumps(
             {
