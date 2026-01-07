@@ -222,6 +222,9 @@ async def read_optimization(
         )
 
         opt = result.get("optimization", {})
+        if isinstance(opt, str):
+             return json.dumps({"error": True, "message": f"Unexpected API response: optimization field is a string ({opt}). Check ID."})
+
         all_backtests = opt.get("backtests", [])
 
         # Sort by target metric (Sharpe by default)
