@@ -23,6 +23,8 @@ import structlog
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
+    ContextEditingMiddleware,
+    ClearToolUsesEdit,
     dynamic_prompt,
     wrap_model_call,
     before_model,
@@ -277,6 +279,17 @@ graph = create_agent(
             model="gpt-4o-mini",
             trigger=("tokens", 100000),
             keep=("messages", 20),
+        ),
+        # Built-in: Clear older tool outputs, keep last 8 results
+        ContextEditingMiddleware(
+            edits=[
+                ClearToolUsesEdit(
+                    trigger=80000,  # Trigger at 80K tokens
+                    keep=8,  # Keep last 8 tool results
+                    clear_tool_inputs=False,  # Preserve tool call arguments
+                    placeholder="[cleared]",
+                ),
+            ],
         ),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
