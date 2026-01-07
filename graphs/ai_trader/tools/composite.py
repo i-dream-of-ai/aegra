@@ -228,6 +228,7 @@ async def qc_compile_and_backtest(
 
 @tool
 async def qc_compile_and_optimize(
+    tool_runtime: ToolRuntime[Context],
     optimization_name: str,
     target: str,
     target_to: str,
@@ -235,7 +236,6 @@ async def qc_compile_and_optimize(
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
-    tool_runtime: ToolRuntime[Context],
 ) -> str:
     """
     Compile code and create an optimization job. Max 3 parameters.
