@@ -171,12 +171,51 @@ def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any
     
     try:
         writer = get_stream_writer()
+        import uuid
+        import time
+        start_time = time.time()
+        
+        # Generate a unique ID for this UI message
+        ui_message_id = str(uuid.uuid4())
 
         def emit_event(event: "SubconsciousEvent"):
+            """Emit events as proper UIMessage format for SubconsciousPanel."""
             if event.type == "instinct_injection":
-                writer({"type": event.type, "data": event.data or {}})
+                # Final injection - push complete UI message with all data
+                data = event.data or {}
+                duration_ms = int((time.time() - start_time) * 1000)
+                writer({
+                    "type": "ui",
+                    "ui": {
+                        "id": ui_message_id,
+                        "name": "subconscious-panel",
+                        "props": {
+                            "stage": "done",
+                            "userIntent": data.get("userIntent"),
+                            "skills": data.get("skills", []),
+                            "content": data.get("content"),
+                            "tokenCount": data.get("tokenCount", 0),
+                            "synthesisMethod": data.get("synthesisMethod", "unknown"),
+                            "durationMs": duration_ms,
+                            # Legacy support
+                            "skillIds": data.get("skillIds", []),
+                            "instinctSkills": data.get("instinctSkills", []),
+                            "contextualSkills": data.get("contextualSkills", []),
+                        },
+                    },
+                })
             else:
-                writer({"type": event.type, "stage": event.stage})
+                # Progress events - push UI message with current stage
+                writer({
+                    "type": "ui",
+                    "ui": {
+                        "id": ui_message_id,
+                        "name": "subconscious-panel",
+                        "props": {
+                            "stage": event.stage,
+                        },
+                    },
+                })
 
         processor = SubconsciousProcessor(on_event=emit_event)
 
@@ -198,7 +237,15 @@ def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any
         logger.warning("Subconscious injection failed", error=str(e))
         with contextlib.suppress(Exception):
             writer = get_stream_writer()
-            writer({"type": "subconscious_thinking", "stage": "done"})
+            # Emit failure state as UI message
+            writer({
+                "type": "ui",
+                "ui": {
+                    "id": str(uuid.uuid4()),
+                    "name": "subconscious-panel",
+                    "props": {"stage": "done"},
+                },
+            })
     
     return None
 
