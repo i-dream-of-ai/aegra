@@ -163,7 +163,7 @@ def build_system_prompt(state: AITraderState, runtime: Runtime) -> str:
 
 
 @before_model
-def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
+async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
     """Inject subconscious context before model call using Generative UI."""
     ctx = runtime.context or {}
     
@@ -209,14 +209,10 @@ def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any
         processor = SubconsciousProcessor(on_event=emit_event)
 
         # Run async subconscious processing
-        import asyncio
-        loop = asyncio.get_event_loop()
-        subconscious = loop.run_until_complete(
-            processor.process(
-                messages=list(state["messages"]),
-                access_token=access_token,
-                current_turn=0,
-            )
+        subconscious = await processor.process(
+            messages=list(state["messages"]),
+            access_token=access_token,
+            current_turn=0,
         )
         
         if subconscious:
