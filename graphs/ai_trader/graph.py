@@ -41,25 +41,25 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
 from langgraph.runtime import Runtime
 
-from ai_trader.context import Context
-from ai_trader.prompts import DEFAULT_MAIN_PROMPT
-from ai_trader.subconscious.middleware import (
+from .context import Context
+from .prompts import DEFAULT_MAIN_PROMPT
+from .subconscious.middleware import (
     SubconsciousMiddleware as SubconsciousProcessor,
 )
 
 if TYPE_CHECKING:
-    from ai_trader.subconscious.types import SubconsciousEvent
+    from .subconscious.types import SubconsciousEvent
 
 # Import all tools
-from ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
-from ai_trader.tools.backtest import TOOLS as BACKTEST_TOOLS
-from ai_trader.tools.compile import TOOLS as COMPILE_TOOLS
-from ai_trader.tools.composite import TOOLS as COMPOSITE_TOOLS
-from ai_trader.tools.files import TOOLS as FILES_TOOLS
-from ai_trader.tools.misc import TOOLS as MISC_TOOLS
-from ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
-from ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
-from ai_trader.tools.review import TOOLS as REVIEW_TOOLS
+from .tools.ai_services import TOOLS as AI_SERVICES_TOOLS
+from .tools.backtest import TOOLS as BACKTEST_TOOLS
+from .tools.compile import TOOLS as COMPILE_TOOLS
+from .tools.composite import TOOLS as COMPOSITE_TOOLS
+from .tools.files import TOOLS as FILES_TOOLS
+from .tools.misc import TOOLS as MISC_TOOLS
+from .tools.object_store import TOOLS as OBJECT_STORE_TOOLS
+from .tools.optimization import TOOLS as OPTIMIZATION_TOOLS
+from .tools.review import TOOLS as REVIEW_TOOLS
 
 logger = structlog.getLogger(__name__)
 
