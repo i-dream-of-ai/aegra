@@ -158,7 +158,7 @@ async def _save_code_version(
 
 
 @tool
-async def compile_and_backtest(backtest_name: str, config: RunnableConfig) -> str:
+async def qc_compile_and_backtest(backtest_name: str, config: RunnableConfig) -> str:
     """
     Compile code and create a backtest using default parameter values.
 
@@ -214,7 +214,7 @@ async def compile_and_backtest(backtest_name: str, config: RunnableConfig) -> st
 
 
 @tool
-async def compile_and_optimize(
+async def qc_compile_and_optimize(
     optimization_name: str,
     target: str,
     target_to: str,
@@ -302,11 +302,11 @@ async def compile_and_optimize(
         )
 
     except Exception as e:
-        return json.dumps({"error": True, "message": f"Unexpected error: {e!s}"})
+        return format_error(f"Unexpected error: {e!s}")
 
 
 @tool
-async def update_and_run_backtest(
+async def qc_update_and_run_backtest(
     file_name: str, file_content: str, backtest_name: str, config: RunnableConfig
 ) -> str:
     """
@@ -323,7 +323,7 @@ async def update_and_run_backtest(
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return json.dumps({"success": False, "error": "No project context."})
+            return format_error("No project context.")
 
         # Update file
         await qc_request(
@@ -407,11 +407,11 @@ async def update_and_run_backtest(
         )
 
     except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return format_error(str(e))
 
 
 @tool
-async def edit_and_run_backtest(
+async def qc_edit_and_run_backtest(
     file_name: str, edits: list[dict], backtest_name: str, config: RunnableConfig
 ) -> str:
     """
@@ -577,13 +577,13 @@ async def edit_and_run_backtest(
         )
 
     except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return format_error(str(e))
 
 
 # Export all tools
 TOOLS = [
-    compile_and_backtest,
-    compile_and_optimize,
-    update_and_run_backtest,
-    edit_and_run_backtest,
+    qc_compile_and_backtest,
+    qc_compile_and_optimize,
+    qc_update_and_run_backtest,
+    qc_edit_and_run_backtest,
 ]

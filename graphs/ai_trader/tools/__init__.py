@@ -43,17 +43,17 @@ from .compile import create_compile, read_compile
 
 # Composite (preferred workflows)
 from .composite import (
-    compile_and_backtest,
-    compile_and_optimize,
-    edit_and_run_backtest,
-    update_and_run_backtest,
+    qc_compile_and_backtest,
+    qc_compile_and_optimize,
+    qc_edit_and_run_backtest,
+    qc_update_and_run_backtest,
 )
 from .files import (
-    create_file,
-    delete_file,
-    read_file,
-    rename_file,
-    update_file,
+    qc_create_file,
+    qc_delete_file,
+    qc_read_file,
+    qc_rename_file,
+    qc_update_file,
 )
 
 # Misc
@@ -90,11 +90,11 @@ from .review import request_code_review
 
 __all__ = [
     # Files (5)
-    "create_file",
-    "read_file",
-    "update_file",
-    "rename_file",
-    "delete_file",
+    "qc_create_file",
+    "qc_read_file",
+    "qc_update_file",
+    "qc_rename_file",
+    "qc_delete_file",
     # Compile (2)
     "create_compile",
     "read_compile",
@@ -121,10 +121,10 @@ __all__ = [
     "list_object_store_files",
     "delete_object",
     # Composite (4)
-    "compile_and_backtest",
-    "compile_and_optimize",
-    "update_and_run_backtest",
-    "edit_and_run_backtest",
+    "qc_compile_and_backtest",
+    "qc_compile_and_optimize",
+    "qc_update_and_run_backtest",
+    "qc_edit_and_run_backtest",
     # AI Services (8)
     "check_initialization_errors",
     "complete_code",

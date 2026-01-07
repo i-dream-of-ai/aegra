@@ -1158,6 +1158,14 @@ async def execute_run_async(
                 if value is not None:
                     graph_context.setdefault(key, value)
 
+        # Also inject project IDs into run_config['configurable'] for tool access
+        # Tools use get_qc_project_id(config) which looks at config.configurable
+        if graph_context.get("qc_project_id"):
+            run_config["configurable"]["qc_project_id"] = graph_context["qc_project_id"]
+        if graph_context.get("project_db_id"):
+            run_config["configurable"]["project_db_id"] = graph_context["project_db_id"]
+
+
         # Handle human-in-the-loop fields
         if interrupt_before is not None:
             run_config["interrupt_before"] = (
