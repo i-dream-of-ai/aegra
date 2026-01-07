@@ -20,7 +20,7 @@ logger = structlog.getLogger(__name__)
 auth = Auth()
 
 # Get authentication type from environment
-AUTH_TYPE = os.getenv("AUTH_TYPE", "noop").lower()
+AUTH_TYPE = os.getenv("AUTH_TYPE", "custom").lower()
 
 if AUTH_TYPE == "noop":
     logger.info("Using noop authentication (no auth required)")
