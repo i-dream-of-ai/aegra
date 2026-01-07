@@ -156,12 +156,17 @@ async def read_backtest_chart(
     backtest_id: str, name: str, sample_count: int = 100
 ) -> str:
     """
-    Read chart data from a backtest. Returns metadata for frontend to display.
+    Read chart data from a backtest. Triggers chart generation, polls until ready, returns data.
+
+    This tool handles the full QC chart lifecycle:
+    1. Initial request triggers chart generation on QC servers
+    2. Polls with short delays until chart data is populated
+    3. Returns complete chart with series data
 
     Args:
         backtest_id: The backtest ID
         name: Chart name (e.g., "Strategy Equity", "Benchmark", "Drawdown")
-        sample_count: Number of data points (default: 100, max: 200)
+        sample_count: Number of data points (default: 100, max: 500)
     """
     try:
         qc_project_id = _get_qc_project_id()
@@ -169,30 +174,66 @@ async def read_backtest_chart(
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        effective_count = min(sample_count, 200)
-
-        data = await qc_request(
-            "/backtests/chart/read",
-            {
-                "projectId": qc_project_id,
-                "backtestId": backtest_id,
-                "name": name,
-                "count": 1,
-            },
-        )
-
-        chart_data = data.get("chart", data)
-        series = chart_data.get("series", {})
+        effective_count = min(max(sample_count, 10), 500)
+        
+        # Polling configuration
+        max_attempts = 5
+        poll_delay = 1.5  # seconds between polls
+        
+        chart_data = None
+        series = {}
+        
+        for attempt in range(max_attempts):
+            data = await qc_request(
+                "/backtests/chart/read",
+                {
+                    "projectId": qc_project_id,
+                    "backtestId": backtest_id,
+                    "name": name,
+                    "count": effective_count,
+                },
+            )
+            
+            chart_data = data.get("chart", data)
+            series = chart_data.get("series", {})
+            
+            # Check if we have actual data points in any series
+            has_data = False
+            for series_name, series_info in series.items():
+                values = series_info.get("values", []) if isinstance(series_info, dict) else []
+                if values:
+                    has_data = True
+                    break
+            
+            if has_data:
+                break
+            
+            # If no data yet and not last attempt, wait and retry
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(poll_delay)
+        
         series_names = list(series.keys())
-
+        
         if not series_names:
             return json.dumps(
                 {
                     "error": True,
-                    "message": f'Chart "{name}" has no series data.',
+                    "message": f'Chart "{name}" has no series data after {max_attempts} attempts.',
                     "backtest_id": backtest_id,
+                    "hint": 'Common charts: "Strategy Equity", "Benchmark", "Drawdown".',
                 }
             )
+        
+        # Build series summary with data point counts
+        series_summary = {}
+        for series_name, series_info in series.items():
+            if isinstance(series_info, dict):
+                values = series_info.get("values", [])
+                series_summary[series_name] = {
+                    "data_points": len(values),
+                    "unit": series_info.get("unit", ""),
+                    "series_type": series_info.get("seriesType", ""),
+                }
 
         return json.dumps(
             {
@@ -203,6 +244,8 @@ async def read_backtest_chart(
                 "chart_name": name,
                 "sample_count": effective_count,
                 "series_names": series_names,
+                "series_summary": series_summary,
+                "series": series,  # Include full series data
                 "message": f'Chart "{name}" ready with {len(series_names)} series.',
             }
         )
