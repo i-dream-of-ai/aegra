@@ -312,7 +312,6 @@ async def call_reviewer(state: State, runtime: Runtime[Context]) -> dict:  # noq
     return {"messages": [response], "request_review": False}
 
 
-# =============================================================================
 # Routing
 # =============================================================================
 
@@ -326,13 +325,6 @@ def route_model_output(state: State) -> Literal["__end__", "tools"]:
     if not last_message.tool_calls:
         return "__end__"
     return "tools"
-
-
-def route_after_tools(state: State) -> Literal["call_model", "call_reviewer"]:
-    """Route after tools: check if review was requested."""
-    if state.request_review:
-        return "call_reviewer"
-    return "call_model"
 
 
 # =============================================================================
@@ -352,14 +344,11 @@ llm_retry_policy = RetryPolicy(
 # Add nodes with retry policies
 builder.add_node("call_model", call_model, retry=llm_retry_policy)
 builder.add_node("tools", ToolNode(ALL_TOOLS), retry=llm_retry_policy)
-builder.add_node("call_reviewer", call_reviewer, retry=llm_retry_policy)
 
 # Edges
 builder.add_edge("__start__", "call_model")
 builder.add_conditional_edges("call_model", route_model_output, ["tools", END])
-builder.add_conditional_edges("tools", route_after_tools, ["call_model", "call_reviewer"])
-builder.add_edge("call_reviewer", "call_model")
+builder.add_edge("tools", "call_model")
 
 # Compile
 graph = builder.compile(name="AI Trader")
-

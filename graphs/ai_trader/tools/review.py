@@ -7,8 +7,13 @@ which causes the graph to route to the call_reviewer node after tools complete.
 This enables shared message history between main agent and reviewer.
 """
 
+from typing import Annotated
+
 from langchain_core.tools import tool
-from langgraph.types import Command
+from langgraph.prebuilt import InjectedState
+
+# Import using relative path since tools is a subpackage of ai_trader
+from ..reviewer import reviewer_graph
 
 
 @tool(
@@ -22,30 +27,27 @@ and provide critique on bugs, QuantConnect pitfalls, and potential improvements.
 The reviewer shares your conversation history and can see all the work
 you've done. Just describe what you want reviewed.""",
 )
-def request_code_review(review_request: str) -> Command:
+async def request_code_review(
+    review_request: str, 
+    state: Annotated[dict, InjectedState]
+) -> str:
     """
     Request a code review from the reviewer subgraph.
-
-    This tool returns a Command that sets request_review=True in the graph state,
-    which triggers routing to the reviewer node. The reviewer will see the 
-    full conversation and the review_request context.
-
-    Args:
-        review_request: Description of what to review. Can include:
-                        - Specific concerns to address
-                        - Recent changes made
-                        - Questions about the implementation
-
-    Returns:
-        Command that updates state with request_review=True
     """
-    # Return Command to update state
-    # ToolNode will process this and update state, triggering reviewer routing
-    return Command(
-        update={
-            "request_review": True,
-        }
-    )
+    # Invoke the reviewer subgraph directly with current state
+    # This runs the subagent in its own graph execution
+    result = await reviewer_graph.ainvoke(state)
+    
+    # The result contains the full state of the subgraph
+    # We want to extract the reviewer's response message
+    reviewer_messages = result.get("messages", [])
+    if not reviewer_messages:
+        return "Reviewer completed but returned no messages."
+        
+    last_message = reviewer_messages[-1]
+    
+    # Return the content of the review
+    return last_message.content
 
 
 # Export tools
