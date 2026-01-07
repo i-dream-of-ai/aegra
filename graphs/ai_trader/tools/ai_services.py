@@ -7,9 +7,9 @@ import re
 from langchain_core.tools import tool
 from openai import AsyncOpenAI
 
-from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import SupabaseClient
-from ai_trader.tools.utils import format_error, format_success
+from ..qc_api import qc_request
+from ..supabase_client import SupabaseClient
+from ..tools.utils import format_error, format_success
 
 
 @tool

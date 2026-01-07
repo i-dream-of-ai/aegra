@@ -6,9 +6,9 @@ import os
 
 from langchain.tools import tool, ToolRuntime
 
-from ai_trader.context import Context
-from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import SupabaseClient
+from ..context import Context
+from ..qc_api import qc_request
+from ..supabase_client import SupabaseClient
 
 
 def _format_error(message: str, details: dict | None = None) -> str:

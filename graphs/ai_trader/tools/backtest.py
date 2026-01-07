@@ -8,8 +8,8 @@ import time
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
 
-from ai_trader.context import Context
-from ai_trader.qc_api import qc_request
+from ..context import Context
+from ..qc_api import qc_request
 
 
 
