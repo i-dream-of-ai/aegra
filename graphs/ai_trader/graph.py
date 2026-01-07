@@ -132,10 +132,28 @@ async def dynamic_model_selection(
 
 
 @dynamic_prompt
-def build_system_prompt(state: AITraderState, runtime: Runtime) -> str:
+def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
     """Build system prompt with timestamp and subconscious context."""
-    ctx = runtime.context or {}
+    # Defensive argument handling to support varying middleware signatures
+    ctx = {}
     
+    # Check positional args (usually runtime or config)
+    if args:
+        arg0 = args[0]
+        if hasattr(arg0, "context"):
+            ctx = arg0.context or {}
+        elif isinstance(arg0, dict):
+            # Might be RunnableConfig
+            ctx = arg0.get("configurable", {})
+        elif hasattr(arg0, "get"):
+             # Some other dict-like object
+             ctx = arg0.get("configurable", {}) or {}
+
+    # Check kwargs if needed (rare for this middleware pattern)
+    if not ctx and "config" in kwargs:
+        cfg = kwargs["config"]
+        ctx = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
+
     # Get base prompt from context or default
     base_prompt = ctx.get("system_prompt") or DEFAULT_MAIN_PROMPT
     
