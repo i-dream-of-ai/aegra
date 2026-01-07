@@ -35,7 +35,7 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
     # Get reviewer configuration
     # Context is a TypedDict so we must use .get()
     reviewer_model = ctx.get("reviewer_model") or os.environ.get(
-        "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"
+        "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
     )
     reviewer_prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
     reviewer_thinking_budget = ctx.get("reviewer_thinking_budget") or 0
