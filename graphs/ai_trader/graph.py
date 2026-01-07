@@ -13,14 +13,15 @@ Middleware patterns:
 - Generative UI via push_ui_message for custom components
 """
 
-from __future__ import annotations
+# from __future__ import annotations
 
 import contextlib
 import os
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Callable, Sequence
+import typing
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 import structlog
 from langchain.agents import create_agent
@@ -87,7 +88,7 @@ class AITraderState(AgentState):
     subconscious_context: str | None = None
     request_review: bool = False
     # Generative UI messages - rendered by frontend via ui-registry
-    ui: Annotated[Sequence[AnyUIMessage], ui_message_reducer] = []
+    ui: typing.Annotated[Sequence[AnyUIMessage], ui_message_reducer] = []
 
 
 # =============================================================================
