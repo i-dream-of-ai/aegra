@@ -235,7 +235,7 @@ async def qc_compile_and_optimize(
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
-    config: RunnableConfig = None,
+    tool_runtime: ToolRuntime[Context],
 ) -> str:
     """
     Compile code and create an optimization job. Max 3 parameters.
@@ -248,14 +248,13 @@ async def qc_compile_and_optimize(
         constraints: Optional constraints [{target, operator, targetValue}]
         node_type: Node type ("O2-8", "O4-12", "O8-16")
         parallel_nodes: Number of parallel nodes (default: 4)
-        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = tool_runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return format_error("No project context.")
+            return _format_error("No project context.")
 
         if len(parameters) > 3:
             return format_error("QC limits optimizations to 3 parameters max.")
