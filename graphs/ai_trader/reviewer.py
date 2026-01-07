@@ -15,7 +15,8 @@ from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import RetryPolicy
 
-from .context import DEFAULT_REVIEWER_PROMPT, Context
+from .context import Context
+from .prompts import DEFAULT_REVIEWER_PROMPT
 from .state import InputState, State
 
 logger = structlog.getLogger(__name__)
