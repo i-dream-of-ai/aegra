@@ -30,7 +30,7 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Mount, Route
 
 from .api.assistants import router as assistants_router
-from .api.prompts import router as prompts_router
+from .api.config import router as config_router
 from .api.runs import router as runs_router
 from .api.store import router as store_router
 from .api.threads import router as threads_router
@@ -284,7 +284,7 @@ else:
     app.include_router(threads_router, prefix="", tags=["Threads"])
     app.include_router(runs_router, prefix="", tags=["Runs"])
     app.include_router(store_router, prefix="", tags=["Store"])
-    app.include_router(prompts_router, prefix="", tags=["Prompts"])
+    app.include_router(config_router, prefix="", tags=["Config"])
 
     # Add exception handlers
     for exc_type, handler in exception_handlers.items():
