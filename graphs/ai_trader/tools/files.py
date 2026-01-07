@@ -16,7 +16,7 @@ def _get_qc_project_id():
 
 
 @tool
-async def create_file(file_name: str, content: str) -> str:
+async def qc_create_file(file_name: str, content: str) -> str:
     """
     Create a new file in the QuantConnect project.
 
@@ -52,7 +52,7 @@ async def create_file(file_name: str, content: str) -> str:
 
 
 @tool
-async def read_file(file_name: str) -> str:
+async def qc_read_file(file_name: str) -> str:
     """
     Read a file from the QuantConnect project.
     Use "*" to read all files.
@@ -117,7 +117,7 @@ async def read_file(file_name: str) -> str:
 
 
 @tool
-async def update_file(file_name: str, content: str) -> str:
+async def qc_update_file(file_name: str, content: str) -> str:
     """
     Update an existing file in the QuantConnect project.
 
@@ -153,7 +153,7 @@ async def update_file(file_name: str, content: str) -> str:
 
 
 @tool
-async def rename_file(old_file_name: str, new_file_name: str) -> str:
+async def qc_rename_file(old_file_name: str, new_file_name: str) -> str:
     """
     Rename a file in the QuantConnect project.
 
@@ -201,7 +201,7 @@ async def rename_file(old_file_name: str, new_file_name: str) -> str:
 
 
 @tool
-async def delete_file(file_name: str) -> str:
+async def qc_delete_file(file_name: str) -> str:
     """
     Delete a file from the QuantConnect project.
 
@@ -232,4 +232,4 @@ async def delete_file(file_name: str) -> str:
 
 
 # Export all tools
-TOOLS = [create_file, read_file, update_file, rename_file, delete_file]
+TOOLS = [qc_create_file, qc_read_file, qc_update_file, qc_rename_file, qc_delete_file]
