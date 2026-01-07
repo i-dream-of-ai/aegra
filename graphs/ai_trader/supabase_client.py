@@ -10,9 +10,7 @@ import os
 from typing import Any
 
 import httpx
-from langgraph.runtime import get_runtime
 
-from ai_trader.context import Context
 
 
 def get_supabase_config() -> tuple[str, str]:
@@ -23,35 +21,6 @@ def get_supabase_config() -> tuple[str, str]:
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     return supabase_url or "", supabase_key or ""
 
-
-def get_user_token() -> str | None:
-    """Get user's access token from runtime context."""
-    try:
-        runtime = get_runtime(Context)
-        return runtime.context.access_token
-    except Exception:
-        return None
-
-
-def get_project_db_id() -> str | None:
-    """Get project_db_id from runtime context."""
-    try:
-        runtime = get_runtime(Context)
-        return runtime.context.project_db_id
-    except Exception:
-        return os.environ.get("PROJECT_DB_ID")
-
-
-def get_qc_project_id() -> int | None:
-    """Get qc_project_id from runtime context."""
-    try:
-        runtime = get_runtime(Context)
-        if runtime.context.qc_project_id is not None:
-            return int(runtime.context.qc_project_id)
-    except Exception:
-        pass
-    env_id = os.environ.get("QC_PROJECT_ID")
-    return int(env_id) if env_id else None
 
 
 class SupabaseClient:
@@ -66,7 +35,7 @@ class SupabaseClient:
         client = SupabaseClient(use_service_role=True)
     """
 
-    def __init__(self, use_service_role: bool = False):
+    def __init__(self, use_service_role: bool = False, access_token: str | None = None):
         self.supabase_url, self.service_role_key = get_supabase_config()
         self.use_service_role = use_service_role
 
@@ -74,7 +43,7 @@ class SupabaseClient:
         if use_service_role:
             self.token = self.service_role_key
         else:
-            self.token = get_user_token() or self.service_role_key
+            self.token = access_token or self.service_role_key
 
         self.anon_key = (
             os.environ.get("SUPABASE_ANON_KEY")

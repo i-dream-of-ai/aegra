@@ -4,17 +4,27 @@ import asyncio
 import json
 import os
 
-from langchain_core.tools import tool
-from langchain_core.runnables import RunnableConfig
+from langchain.tools import tool, ToolRuntime
 
+from ai_trader.context import Context
 from ai_trader.qc_api import qc_request
-from ai_trader.supabase_client import (
-    SupabaseClient,
-    get_project_db_id,
-)
+from ai_trader.supabase_client import SupabaseClient
 
 
-from ai_trader.tools.utils import get_qc_project_id, format_error, format_success
+def _format_error(message: str, details: dict | None = None) -> str:
+    """Format an error response."""
+    response = {"error": True, "message": message}
+    if details:
+        response.update(details)
+    return json.dumps(response, indent=2)
+
+
+def _format_success(message: str, data: dict | None = None) -> str:
+    """Format a success response."""
+    response = {"success": True, "message": message}
+    if data:
+        response.update(data)
+    return json.dumps(response, indent=2)
 
 
 async def _poll_compile(
@@ -104,6 +114,8 @@ async def _save_code_version(
     compile_id: str,
     code: str,
     stats: dict,
+    qc_project_id: int | None,
+    project_db_id: str | None,
     status: str = "completed",
     error_message: str | None = None,
 ) -> dict | None:
@@ -115,15 +127,14 @@ async def _save_code_version(
         compile_id: QC compile ID
         code: Full code content
         stats: Backtest statistics from QC
+        qc_project_id: QuantConnect project ID
+        project_db_id: Database project ID
         status: "completed", "failed", or "error"
         error_message: Error message if failed
 
     Returns:
         The inserted code_version record or None on error
     """
-    project_db_id = get_project_db_id()
-    qc_project_id = get_qc_project_id()
-
     if not project_db_id:
         return None
 
@@ -158,20 +169,22 @@ async def _save_code_version(
 
 
 @tool
-async def qc_compile_and_backtest(backtest_name: str, config: RunnableConfig) -> str:
+async def qc_compile_and_backtest(
+    backtest_name: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Compile code and create a backtest using default parameter values.
 
     Args:
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
-        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return format_error("No project context.")
+            return _format_error("No project context.")
 
         # Compile
         compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
@@ -302,12 +315,15 @@ async def qc_compile_and_optimize(
         )
 
     except Exception as e:
-        return format_error(f"Unexpected error: {e!s}")
+        return _format_error(f"Unexpected error: {e!s}")
 
 
 @tool
 async def qc_update_and_run_backtest(
-    file_name: str, file_content: str, backtest_name: str, config: RunnableConfig
+    file_name: str,
+    file_content: str,
+    backtest_name: str,
+    runtime: ToolRuntime[Context],
 ) -> str:
     """
     Update file with COMPLETE new content, compile, and run backtest.
@@ -316,14 +332,14 @@ async def qc_update_and_run_backtest(
         file_name: Name of the file to update (e.g., "main.py")
         file_content: Complete new contents of the file
         backtest_name: Format: "[Symbols] [Strategy Type]"
-        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = runtime.context.get("qc_project_id")
+        project_db_id = runtime.context.get("project_db_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return format_error("No project context.")
+            return _format_error("No project context.")
 
         # Update file
         await qc_request(
@@ -380,6 +396,8 @@ async def qc_update_and_run_backtest(
                 compile_id=compile_id,
                 code=file_content,
                 stats=stats,
+                qc_project_id=qc_project_id,
+                project_db_id=project_db_id,
                 status="completed",
             )
 
@@ -407,12 +425,15 @@ async def qc_update_and_run_backtest(
         )
 
     except Exception as e:
-        return format_error(str(e))
+        return _format_error(str(e))
 
 
 @tool
 async def qc_edit_and_run_backtest(
-    file_name: str, edits: list[dict], backtest_name: str, config: RunnableConfig
+    file_name: str,
+    edits: list[dict],
+    backtest_name: str,
+    runtime: ToolRuntime[Context],
 ) -> str:
     """
     Edit file using search-and-replace, then compile and run backtest.
@@ -421,14 +442,14 @@ async def qc_edit_and_run_backtest(
         file_name: Name of the file to edit
         edits: List of edits, each with old_content and new_content
         backtest_name: Format: "[Symbols] [Strategy Type]"
-        config: RunnableConfig from LangGraph
     """
     try:
-        qc_project_id = get_qc_project_id(config)
+        qc_project_id = runtime.context.get("qc_project_id")
+        project_db_id = runtime.context.get("project_db_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
-            return format_error("No project context.")
+            return _format_error("No project context.")
 
         # Read current file
         files_data = await qc_request(
@@ -436,7 +457,7 @@ async def qc_edit_and_run_backtest(
         )
         files = files_data.get("files", [])
         if not files:
-            return format_error(f"File '{file_name}' not found")
+            return _format_error(f"File '{file_name}' not found")
 
         current_content = (
             files[0].get("content", "")
@@ -451,7 +472,7 @@ async def qc_edit_and_run_backtest(
             new_content = edit.get("new_content", "")
 
             if not old_content:
-                return format_error(f"Edit {i + 1}: old_content required")
+                return _format_error(f"Edit {i + 1}: old_content required")
 
             # Robust matching with whitespace stripping
             old_stripped = old_content.strip()
@@ -481,18 +502,18 @@ async def qc_edit_and_run_backtest(
                         )
                         continue
                     elif len(matches) > 1:
-                        return format_error(
+                        return _format_error(
                             f"Edit {i + 1}: old_content appears {len(matches)} times (fuzzy match). Must be unique."
                         )
 
             if occurrences == 0:
-                return format_error(
+                return _format_error(
                     f"Edit {i + 1}: old_content not found in file",
                     {"hint": "Use read_file to check content. Whitespace matters."},
                 )
 
             if occurrences > 1:
-                return format_error(
+                return _format_error(
                     f"Edit {i + 1}: old_content not unique ({occurrences} found)"
                 )
 
@@ -549,6 +570,8 @@ async def qc_edit_and_run_backtest(
                 compile_id=compile_id,
                 code=updated_content,
                 stats=stats,
+                qc_project_id=qc_project_id,
+                project_db_id=project_db_id,
                 status="completed",
             )
 
@@ -577,7 +600,7 @@ async def qc_edit_and_run_backtest(
         )
 
     except Exception as e:
-        return format_error(str(e))
+        return _format_error(str(e))
 
 
 # Export all tools
