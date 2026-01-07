@@ -15,8 +15,8 @@ from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import RetryPolicy
 
-from ai_trader.context import DEFAULT_REVIEWER_PROMPT, Context
-from ai_trader.state import InputState, State
+from .context import DEFAULT_REVIEWER_PROMPT, Context
+from .state import InputState, State
 
 logger = structlog.getLogger(__name__)
 

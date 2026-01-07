@@ -9,7 +9,7 @@ import time
 import httpx
 from langchain_core.tools import tool
 
-from ai_trader.qc_api import qc_request
+from ..qc_api import qc_request
 
 
 @tool
