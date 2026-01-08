@@ -367,6 +367,13 @@ async def create_run(
     project_id = request_metadata.get("project_id")
     qc_project_id = request_metadata.get("qc_project_id")
 
+    # Add project IDs to context so they flow to execute_run_async
+    # This enables DB config fetch for model selection and prompt loading
+    if project_id:
+        context["project_db_id"] = project_id
+    if qc_project_id:
+        context["qc_project_id"] = qc_project_id
+
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
     await update_thread_metadata(
@@ -508,6 +515,13 @@ async def create_and_stream_run(
     request_metadata = request.metadata or {}
     project_id = request_metadata.get("project_id")
     qc_project_id = request_metadata.get("qc_project_id")
+
+    # Add project IDs to context so they flow to execute_run_async
+    # This enables DB config fetch for model selection and prompt loading
+    if project_id:
+        context["project_db_id"] = project_id
+    if qc_project_id:
+        context["qc_project_id"] = qc_project_id
 
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
@@ -838,6 +852,13 @@ async def wait_for_run(
     request_metadata = request.metadata or {}
     project_id = request_metadata.get("project_id")
     qc_project_id = request_metadata.get("qc_project_id")
+
+    # Add project IDs to context so they flow to execute_run_async
+    # This enables DB config fetch for model selection and prompt loading
+    if project_id:
+        context["project_db_id"] = project_id
+    if qc_project_id:
+        context["qc_project_id"] = qc_project_id
 
     # Mark thread as busy and update metadata with assistant/graph info
     # update_thread_metadata will auto-create thread if it doesn't exist
