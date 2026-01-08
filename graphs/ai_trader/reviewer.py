@@ -75,8 +75,19 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
         import re
         return re.sub(r'[\s<|\\/>]', '_', name)
     
+    # Filter out tool-related messages - OpenAI requires tool_calls to have matching
+    # tool responses, but the reviewer is a separate model call that doesn't have them
+    from langchain_core.messages import ToolMessage
+    
     sanitized_messages = []
     for msg in state.messages:
+        # Skip ToolMessage (tool responses)
+        if isinstance(msg, ToolMessage):
+            continue
+        # Skip AIMessage with tool_calls 
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            continue
+        
         if hasattr(msg, 'name') and msg.name:
             # Create a copy with sanitized name
             msg_copy = msg.model_copy()
