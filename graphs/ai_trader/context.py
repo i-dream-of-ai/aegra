@@ -8,7 +8,7 @@ Context is a TypedDict (not a dataclass) per LangChain v1.0 requirements.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing_extensions import TypedDict
 
 
 class Context(TypedDict, total=False):
