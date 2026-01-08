@@ -37,6 +37,7 @@ from langchain.agents.middleware import (
     ModelRequest,
     ModelResponse,
     AgentState,
+    AgentMiddleware,
 )
 from langchain_openai import ChatOpenAI
 from langchain.messages import SystemMessage
@@ -91,6 +92,24 @@ class AITraderState(AgentState):
     request_review: bool = False
     # Generative UI messages - rendered by frontend via ui-registry
     ui: typing.Annotated[Sequence[AnyUIMessage], ui_message_reducer] = []
+
+
+# =============================================================================
+# Middleware: Generative UI State
+# =============================================================================
+# NOTE: When using create_agent() with middleware, the state_schema parameter
+# is ignored. State extensions must be registered via middleware's state_schema.
+# See: https://github.com/langchain-ai/langchain/issues/33217
+
+
+class GenerativeUIMiddleware(AgentMiddleware[AITraderState]):
+    """Middleware that registers the ui field in agent state for generative UI.
+
+    This middleware doesn't have any hooks - its only purpose is to register
+    the AITraderState schema which includes the `ui` field with ui_message_reducer.
+    Without this, push_ui_message() calls won't persist across checkpoints.
+    """
+    state_schema = AITraderState
 
 
 # =============================================================================
@@ -381,6 +400,9 @@ graph = create_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     middleware=[
+        # Generative UI state - registers ui field with ui_message_reducer
+        # Must be first to ensure state schema is available to other middleware
+        GenerativeUIMiddleware(),
         # Subagent support via SubAgentMiddleware
         SubAgentMiddleware(
             default_model=DEFAULT_MODEL,
