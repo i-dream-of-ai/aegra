@@ -5,6 +5,7 @@ import json
 import os
 
 from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
@@ -213,6 +214,15 @@ async def qc_compile_and_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
+        # Emit UI for backtest started
+        push_ui_message("backtest-stats", {
+            "backtestId": backtest_id,
+            "name": backtest_name,
+            "status": "Running",
+            "completed": False,
+            "summary": {},
+        }, message={"id": runtime.tool_call_id})
+
         return format_success(
             f"Backtest created! Use read_backtest with ID: {backtest_id}",
             {
@@ -400,6 +410,21 @@ async def qc_update_and_run_backtest(
                 status="completed",
             )
 
+            # Emit custom UI for backtest stats
+            push_ui_message("backtest-stats", {
+                "backtestId": backtest_id,
+                "name": backtest_name,
+                "status": "Completed",
+                "completed": True,
+                "summary": {
+                    "totalReturn": stats.get("Net Profit"),
+                    "sharpeRatio": stats.get("Sharpe Ratio"),
+                    "drawdown": stats.get("Drawdown"),
+                    "totalTrades": stats.get("Total Trades"),
+                    "winRate": stats.get("Win Rate"),
+                },
+            }, message={"id": runtime.tool_call_id})
+
             return json.dumps(
                 {
                     "success": True,
@@ -573,6 +598,21 @@ async def qc_edit_and_run_backtest(
                 project_db_id=project_db_id,
                 status="completed",
             )
+
+            # Emit custom UI component for backtest stats
+            push_ui_message("backtest-stats", {
+                "backtestId": backtest_id,
+                "name": backtest_name,
+                "status": "Completed",
+                "completed": True,
+                "summary": {
+                    "totalReturn": stats.get("Net Profit"),
+                    "sharpeRatio": stats.get("Sharpe Ratio"),
+                    "drawdown": stats.get("Drawdown"),
+                    "totalTrades": stats.get("Total Trades"),
+                    "winRate": stats.get("Win Rate"),
+                },
+            }, message={"id": runtime.tool_call_id})
 
             return json.dumps(
                 {
