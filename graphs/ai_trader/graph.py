@@ -367,13 +367,17 @@ He operates in isolated context and returns a focused review.""",
     runnable=reviewer_graph,
 )
 
-# Create deep agent with all middleware and subagents
-# Note: create_deep_agent has built-in summarization and dangling tool repair
-graph = create_deep_agent(
+# Create agent with all middleware and subagent support
+graph = create_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
-    subagents=[REVIEWER_SUBAGENT],
     middleware=[
+        # Subagent support via SubAgentMiddleware
+        SubAgentMiddleware(
+            default_model=DEFAULT_MODEL,
+            default_tools=[],
+            subagents=[REVIEWER_SUBAGENT],
+        ),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious
