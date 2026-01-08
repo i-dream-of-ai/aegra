@@ -4,16 +4,22 @@ import json
 import os
 import re
 
-from langchain_core.tools import tool
+from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 from openai import AsyncOpenAI
 
+from ..context import Context
 from ..qc_api import qc_request
 from ..supabase_client import SupabaseClient
 from ..tools.utils import format_error, format_success
 
 
 @tool
-async def check_initialization_errors(code: str, file_name: str = "main.py") -> str:
+async def check_initialization_errors(
+    code: str,
+    runtime: ToolRuntime[Context],
+    file_name: str = "main.py",
+) -> str:
     """
     Check Python code for potential initialization errors by running a short backtest.
 
@@ -29,6 +35,15 @@ async def check_initialization_errors(code: str, file_name: str = "main.py") -> 
                 "files": [{"name": file_name, "content": code}],
             },
         )
+        
+        has_errors = data.get("hasError", False)
+        push_ui_message("code-check", {
+            "type": "initialization",
+            "fileName": file_name,
+            "hasErrors": has_errors,
+            "message": data.get("error") if has_errors else "No initialization errors found",
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -36,7 +51,11 @@ async def check_initialization_errors(code: str, file_name: str = "main.py") -> 
 
 
 @tool
-async def complete_code(sentence: str, response_limit: int = 10) -> str:
+async def complete_code(
+    sentence: str,
+    runtime: ToolRuntime[Context],
+    response_limit: int = 10,
+) -> str:
     """
     AI code completion for QuantConnect algorithms.
 
@@ -53,6 +72,14 @@ async def complete_code(sentence: str, response_limit: int = 10) -> str:
                 "responseSizeLimit": response_limit,
             },
         )
+        
+        completions = data.get("completions", [])
+        push_ui_message("code-completion", {
+            "query": sentence,
+            "completions": completions[:5] if completions else [],
+            "count": len(completions),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -60,7 +87,11 @@ async def complete_code(sentence: str, response_limit: int = 10) -> str:
 
 
 @tool
-async def enhance_error_message(error_message: str, stacktrace: str = None) -> str:
+async def enhance_error_message(
+    error_message: str,
+    runtime: ToolRuntime[Context],
+    stacktrace: str = None,
+) -> str:
     """
     Get enhanced error explanations with suggestions for fixes.
 
@@ -80,6 +111,13 @@ async def enhance_error_message(error_message: str, stacktrace: str = None) -> s
                 "error": error_obj,
             },
         )
+        
+        push_ui_message("error-explanation", {
+            "originalError": error_message,
+            "explanation": data.get("explanation", ""),
+            "suggestions": data.get("suggestions", []),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -87,7 +125,11 @@ async def enhance_error_message(error_message: str, stacktrace: str = None) -> s
 
 
 @tool
-async def check_syntax(code: str, file_name: str = "main.py") -> str:
+async def check_syntax(
+    code: str,
+    runtime: ToolRuntime[Context],
+    file_name: str = "main.py",
+) -> str:
     """
     Check Python code syntax for errors before compiling.
 
@@ -103,6 +145,16 @@ async def check_syntax(code: str, file_name: str = "main.py") -> str:
                 "files": [{"name": file_name, "content": code}],
             },
         )
+        
+        errors = data.get("errors", [])
+        push_ui_message("code-check", {
+            "type": "syntax",
+            "fileName": file_name,
+            "hasErrors": len(errors) > 0,
+            "errors": errors[:5] if errors else [],
+            "message": f"{len(errors)} syntax errors found" if errors else "No syntax errors",
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -110,7 +162,11 @@ async def check_syntax(code: str, file_name: str = "main.py") -> str:
 
 
 @tool
-async def update_code_to_pep8(code: str, file_name: str = "main.py") -> str:
+async def update_code_to_pep8(
+    code: str,
+    runtime: ToolRuntime[Context],
+    file_name: str = "main.py",
+) -> str:
     """
     Format Python code to PEP8 standards.
 
@@ -125,6 +181,13 @@ async def update_code_to_pep8(code: str, file_name: str = "main.py") -> str:
                 "files": [{"name": file_name, "content": code}],
             },
         )
+        
+        push_ui_message("code-format", {
+            "fileName": file_name,
+            "success": True,
+            "message": "Code formatted to PEP8 standards",
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -132,7 +195,10 @@ async def update_code_to_pep8(code: str, file_name: str = "main.py") -> str:
 
 
 @tool
-async def search_quantconnect(query: str) -> str:
+async def search_quantconnect(
+    query: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Search QuantConnect documentation and examples.
 
@@ -151,6 +217,18 @@ async def search_quantconnect(query: str) -> str:
                 ],
             },
         )
+        
+        results = data.get("results", [])
+        push_ui_message("search-results", {
+            "query": query,
+            "source": "QuantConnect",
+            "resultsCount": len(results),
+            "results": [
+                {"title": r.get("title", ""), "type": r.get("type", ""), "url": r.get("url", "")}
+                for r in results[:5]
+            ] if results else [],
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -167,7 +245,11 @@ async def _generate_embedding(text: str) -> list[float]:
 
 
 @tool
-async def search_local_algorithms(query: str, limit: int = 5) -> str:
+async def search_local_algorithms(
+    query: str,
+    runtime: ToolRuntime[Context],
+    limit: int = 5,
+) -> str:
     """
     Search ~1,500 QuantConnect algorithms using semantic search.
 
@@ -192,6 +274,16 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
             },
         )
 
+        push_ui_message("search-results", {
+            "query": query,
+            "source": "Algorithm Knowledge Base",
+            "resultsCount": len(results or []),
+            "results": [
+                {"title": r.get("file_path", ""), "summary": r.get("summary", "")[:100], "id": r.get("id")}
+                for r in (results or [])[:5]
+            ],
+        }, message={"id": runtime.tool_call_id})
+
         return json.dumps(
             {
                 "searchInfo": {"query": query, "resultsReturned": len(results or [])},
@@ -214,7 +306,10 @@ async def search_local_algorithms(query: str, limit: int = 5) -> str:
 
 
 @tool
-async def get_algorithm_code(algorithm_id: str) -> str:
+async def get_algorithm_code(
+    algorithm_id: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Get full code of an algorithm from the knowledge base.
 
@@ -248,6 +343,13 @@ async def get_algorithm_code(algorithm_id: str) -> str:
         code = algorithm.get("code", "")
         if len(code) > 80000:
             code = code[:80000] + "\n\n... [CODE TRUNCATED]"
+
+        push_ui_message("algorithm-code", {
+            "id": algorithm.get("id"),
+            "filePath": algorithm.get("file_path"),
+            "summary": algorithm.get("summary"),
+            "lines": len(code.split("\n")),
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {

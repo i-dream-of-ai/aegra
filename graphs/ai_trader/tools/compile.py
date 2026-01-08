@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
@@ -29,6 +30,13 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
         compile_id = result.get("compileId")
         state = result.get("state", "Unknown")
 
+        # Emit compiling UI
+        push_ui_message("compile-status", {
+            "compileId": compile_id,
+            "state": "InQueue",
+            "status": "Compiling...",
+        }, message={"id": runtime.tool_call_id})
+
         # Wait for compilation to complete
         max_wait = 60
         waited = 0
@@ -42,6 +50,14 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
             state = status.get("state", "Unknown")
 
         if state == "BuildSuccess":
+            # Emit success UI
+            push_ui_message("compile-status", {
+                "compileId": compile_id,
+                "state": "BuildSuccess",
+                "status": "Compilation successful",
+                "success": True,
+            }, message={"id": runtime.tool_call_id})
+            
             return json.dumps(
                 {
                     "success": True,
@@ -52,6 +68,16 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
             )
         elif state == "BuildError":
             logs = result.get("logs", [])
+            
+            # Emit error UI
+            push_ui_message("compile-status", {
+                "compileId": compile_id,
+                "state": "BuildError",
+                "status": "Compilation failed",
+                "success": False,
+                "errors": logs[:5] if logs else [],
+            }, message={"id": runtime.tool_call_id})
+            
             return json.dumps(
                 {
                     "error": True,
@@ -62,6 +88,13 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
                 }
             )
         else:
+            # Emit status UI
+            push_ui_message("compile-status", {
+                "compileId": compile_id,
+                "state": state,
+                "status": f"Compile state: {state}",
+            }, message={"id": runtime.tool_call_id})
+            
             return json.dumps(
                 {
                     "success": True,
@@ -99,6 +132,15 @@ async def read_compile(
 
         state = result.get("state", "Unknown")
         logs = result.get("logs", [])
+
+        # Emit compile status UI
+        push_ui_message("compile-status", {
+            "compileId": compile_id,
+            "state": state,
+            "status": "Success" if state == "BuildSuccess" else "Failed" if state == "BuildError" else state,
+            "success": state == "BuildSuccess",
+            "errors": logs[:5] if state == "BuildError" and logs else [],
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {

@@ -7,13 +7,19 @@ import os
 import time
 
 import httpx
-from langchain_core.tools import tool
+from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 
+from ..context import Context
 from ..qc_api import qc_request
 
 
 @tool
-async def upload_object(key: str, content: str) -> str:
+async def upload_object(
+    key: str,
+    content: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Upload data to QuantConnect object store.
 
@@ -68,6 +74,15 @@ async def upload_object(key: str, content: str) -> str:
                     }
                 )
 
+        # Emit object-store UI
+        push_ui_message("object-store-operation", {
+            "operation": "upload",
+            "key": key,
+            "success": True,
+            "size": len(content),
+            "message": f"Successfully uploaded object: {key}",
+        }, message={"id": runtime.tool_call_id})
+
         return json.dumps(
             {
                 "success": True,
@@ -81,7 +96,10 @@ async def upload_object(key: str, content: str) -> str:
 
 
 @tool
-async def read_object_properties(key: str) -> str:
+async def read_object_properties(
+    key: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Read object store file metadata.
 
@@ -98,6 +116,14 @@ async def read_object_properties(key: str) -> str:
         data = await qc_request(
             "/object/properties", {"organizationId": org_id, "key": key}
         )
+        
+        # Emit object properties UI
+        push_ui_message("object-store-properties", {
+            "key": key,
+            "size": data.get("size"),
+            "modified": data.get("modified"),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -107,7 +133,10 @@ async def read_object_properties(key: str) -> str:
 
 
 @tool
-async def list_object_store_files(path: str = "") -> str:
+async def list_object_store_files(
+    runtime: ToolRuntime[Context],
+    path: str = "",
+) -> str:
     """
     List object store files and get their keys.
 
@@ -124,6 +153,15 @@ async def list_object_store_files(path: str = "") -> str:
         data = await qc_request(
             "/object/list", {"organizationId": org_id, "path": path or ""}
         )
+        
+        objects = data.get("objects", [])
+        # Emit object store list UI
+        push_ui_message("object-store-list", {
+            "path": path or "/",
+            "objects": [{"key": o.get("key"), "size": o.get("size")} for o in objects[:10]],
+            "count": len(objects),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(data, indent=2)
 
     except Exception as e:
@@ -133,7 +171,10 @@ async def list_object_store_files(path: str = "") -> str:
 
 
 @tool
-async def delete_object(key: str) -> str:
+async def delete_object(
+    key: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Delete an object from the QuantConnect object store.
 
@@ -148,6 +189,15 @@ async def delete_object(key: str) -> str:
             )
 
         await qc_request("/object/delete", {"organizationId": org_id, "key": key})
+        
+        # Emit object-store delete UI
+        push_ui_message("object-store-operation", {
+            "operation": "delete",
+            "key": key,
+            "success": True,
+            "message": f"Successfully deleted object: {key}",
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(
             {"success": True, "message": f"Successfully deleted object: {key}"}
         )

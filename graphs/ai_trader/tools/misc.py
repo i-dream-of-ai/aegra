@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
@@ -11,7 +12,11 @@ from ..supabase_client import SupabaseClient
 
 
 @tool
-async def wait(seconds: int, reason: str) -> str:
+async def wait(
+    seconds: int,
+    reason: str,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Wait for a specified duration before continuing.
 
@@ -21,7 +26,21 @@ async def wait(seconds: int, reason: str) -> str:
     """
     # Clamp to reasonable bounds
     wait_time = max(1, min(60, seconds))
+    
+    push_ui_message("wait-status", {
+        "seconds": wait_time,
+        "reason": reason,
+        "status": "waiting",
+    }, message={"id": runtime.tool_call_id})
+    
     await asyncio.sleep(wait_time)
+    
+    push_ui_message("wait-status", {
+        "seconds": wait_time,
+        "reason": reason,
+        "status": "completed",
+    }, message={"id": runtime.tool_call_id})
+    
     return json.dumps(
         {"status": "completed", "waited_seconds": wait_time, "reason": reason}
     )
@@ -89,6 +108,16 @@ async def get_code_versions(
                 }
             )
 
+        # Emit code versions list UI
+        push_ui_message("code-versions-list", {
+            "versions": versions[:5],
+            "pagination": {
+                "currentPage": page,
+                "totalPages": total_pages,
+                "totalResults": total,
+            },
+        }, message={"id": runtime.tool_call_id})
+
         return json.dumps(
             {
                 "pagination": {
@@ -109,7 +138,10 @@ async def get_code_versions(
 
 
 @tool
-async def get_code_version(version_id: int) -> str:
+async def get_code_version(
+    version_id: int,
+    runtime: ToolRuntime[Context],
+) -> str:
     """
     Get a specific code version by ID.
 
@@ -132,7 +164,19 @@ async def get_code_version(version_id: int) -> str:
                 {"error": True, "message": f"Code version {version_id} not found."}
             )
 
-        return json.dumps(data[0], indent=2)
+        version = data[0]
+        
+        # Emit code version UI
+        push_ui_message("code-version-detail", {
+            "id": version.get("id"),
+            "name": version.get("backtest_name") or version.get("name"),
+            "backtestId": version.get("backtest_id"),
+            "totalReturn": version.get("total_return"),
+            "sharpeRatio": version.get("sharpe_ratio"),
+            "lines": len(version.get("code", "").split("\n")) if version.get("code") else 0,
+        }, message={"id": runtime.tool_call_id})
+
+        return json.dumps(version, indent=2)
 
     except Exception as e:
         return json.dumps(
@@ -149,6 +193,13 @@ async def read_project_nodes(runtime: ToolRuntime[Context]) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         result = await qc_request("/projects/nodes/read", {"projectId": qc_project_id})
+        
+        nodes = result.get("nodes", [])
+        push_ui_message("project-nodes", {
+            "nodes": nodes[:10] if nodes else [],
+            "count": len(nodes),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(result, indent=2)
 
     except Exception as e:
@@ -176,6 +227,13 @@ async def update_project_nodes(
         await qc_request(
             "/projects/nodes/update", {"projectId": qc_project_id, "nodes": nodes}
         )
+        
+        push_ui_message("project-nodes-update", {
+            "success": True,
+            "nodes": nodes,
+            "message": f"Updated project nodes: {', '.join(nodes)}",
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(
             {"success": True, "message": f"Updated project nodes: {nodes}"}
         )
@@ -195,6 +253,13 @@ async def read_lean_versions(runtime: ToolRuntime[Context]) -> str:
             return json.dumps({"error": True, "message": "No project context."})
 
         result = await qc_request("/lean/versions", {"projectId": qc_project_id})
+        
+        versions = result.get("versions", [])
+        push_ui_message("lean-versions", {
+            "versions": versions[:10] if versions else [],
+            "count": len(versions),
+        }, message={"id": runtime.tool_call_id})
+        
         return json.dumps(result, indent=2)
 
     except Exception as e:
