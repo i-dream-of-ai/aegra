@@ -29,7 +29,7 @@ class ThreadStateService:
             created_at = self._extract_created_at(snapshot)
             
             # Debug: Log the keys in values to see if 'ui' is present
-            logger.debug(
+            logger.info(
                 "Snapshot values keys",
                 thread_id=thread_id,
                 value_keys=list(values.keys()) if isinstance(values, dict) else "not_a_dict",
