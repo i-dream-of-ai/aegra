@@ -212,6 +212,8 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
 @before_model
 async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
     """Inject subconscious context before model call using Generative UI."""
+    from langgraph.graph.ui import UIMessage
+    
     ctx = runtime.context or {}
     
     logger.info("inject_subconscious called", context_keys=list(ctx.keys()) if ctx else [])
@@ -227,18 +229,22 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
     
     logger.info("Subconscious processing starting", has_token=bool(access_token))
     
+    # Collect UI messages to return
+    ui_messages: list[UIMessage] = []
+    
     try:
         start_time = time.time()
 
         def emit_event(event: "SubconsciousEvent"):
-            """Emit events via push_ui_message for SubconsciousPanel."""
+            """Collect UI messages for state update."""
+            nonlocal ui_messages
             if event.type == "instinct_injection":
-                # Final injection - push complete UI message with all data
                 data = event.data or {}
                 duration_ms = int((time.time() - start_time) * 1000)
-                push_ui_message(
-                    "subconscious-panel",
-                    {
+                # Create UI message for subconscious panel
+                ui_messages.append(UIMessage(
+                    name="subconscious-panel",
+                    props={
                         "stage": "done",
                         "userIntent": data.get("userIntent"),
                         "skills": data.get("skills", []),
@@ -246,18 +252,17 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
                         "tokenCount": data.get("tokenCount", 0),
                         "synthesisMethod": data.get("synthesisMethod", "unknown"),
                         "durationMs": duration_ms,
-                        # Legacy support
                         "skillIds": data.get("skillIds", []),
                         "instinctSkills": data.get("instinctSkills", []),
                         "contextualSkills": data.get("contextualSkills", []),
                     },
-                )
+                ))
             else:
-                # Progress events - push UI message with current stage
-                push_ui_message(
-                    "subconscious-panel",
-                    {"stage": event.stage},
-                )
+                # Progress events
+                ui_messages.append(UIMessage(
+                    name="subconscious-panel",
+                    props={"stage": event.stage},
+                ))
 
         processor = SubconsciousProcessor(on_event=emit_event)
 
@@ -272,16 +277,20 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
                    has_result=bool(subconscious),
                    result_length=len(subconscious) if subconscious else 0)
         
+        # Return state updates including both subconscious_context and ui messages
+        result = {}
         if subconscious:
-            return {"subconscious_context": subconscious}
+            result["subconscious_context"] = subconscious
+        if ui_messages:
+            result["ui"] = ui_messages
+        
+        return result if result else None
             
     except Exception as e:
         logger.warning("Subconscious injection failed", error=str(e), exc_info=True)
-        with contextlib.suppress(Exception):
-            # Emit failure state as UI message
-            push_ui_message("subconscious-panel", {"stage": "done"})
     
     return None
+
 
 
 # =============================================================================
