@@ -104,33 +104,36 @@ async def dynamic_model_selection(
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """Select model dynamically based on runtime context."""
+    from langchain_anthropic import ChatAnthropic
+    
     ctx = request.runtime.context or {}
     model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", "gpt-5.2"))
     
-    # Initialize model based on name
-    model = init_chat_model(model_name)
+    # Initialize model based on name - use explicit class to ensure proper type detection
+    is_claude = model_name.startswith("claude")
+    is_openai = model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3") or model_name.startswith("ft:")
     
-    # Apply Claude thinking budget if set
-    if model_name.startswith("claude"):
+    if is_claude:
+        model = ChatAnthropic(model=model_name)
         thinking_budget = ctx.get("thinking_budget") or 0
         if thinking_budget > 0:
             model = model.bind(
                 thinking={"type": "enabled", "budget_tokens": thinking_budget}
             )
-    
-    # Apply OpenAI reasoning effort if set
-    elif model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3") or model_name.startswith("ft:"):
+    else:
+        # Default to OpenAI for all other models
+        model = ChatOpenAI(model=model_name)
         reasoning_effort = ctx.get("reasoning_effort")
         if reasoning_effort and reasoning_effort != "none":
             model = model.bind(reasoning_effort=reasoning_effort)
         
         # OpenAI has strict validation on message names - sanitize them
-        # Pattern: ^[^\s<|\\/>]+$ (no whitespace, <, |, \, /, >)
+        # Pattern: ^[^\s<|\\/\>]+$ (no whitespace, <, |, \, /, >)
         import re
         def sanitize_name(name: str) -> str:
             if not name:
                 return name
-            return re.sub(r'[\s<|\\/>]', '_', name)
+            return re.sub(r'[\s<|\\/\>]', '_', name)
         
         # Sanitize message names in the request
         sanitized_messages = []
@@ -145,7 +148,7 @@ async def dynamic_model_selection(
         # Override request with sanitized messages
         request = request.override(messages=sanitized_messages)
     
-    logger.info("Dynamic model selection", model=model_name)
+    logger.info("Dynamic model selection", model=model_name, model_type=type(model).__name__)
     return await handler(request.override(model=model))
 
 
