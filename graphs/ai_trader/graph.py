@@ -232,7 +232,10 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
 async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
     """Inject subconscious context before model call using Generative UI."""
     from langgraph.graph.ui import UIMessage
-    
+
+    # Generate unique ID for this subconscious run
+    subconscious_run_id = str(uuid.uuid4())[:8]
+
     ctx = runtime.context or {}
     
     logger.info("inject_subconscious called", context_keys=list(ctx.keys()) if ctx else [])
@@ -262,6 +265,7 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
                 duration_ms = int((time.time() - start_time) * 1000)
                 # Create UI message for subconscious panel
                 ui_messages.append(UIMessage(
+                    id=f"subconscious-{subconscious_run_id}-done",
                     name="subconscious-panel",
                     props={
                         "stage": "done",
@@ -277,8 +281,9 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
                     },
                 ))
             else:
-                # Progress events
+                # Progress events - each stage gets a unique ID
                 ui_messages.append(UIMessage(
+                    id=f"subconscious-{subconscious_run_id}-{event.stage}",
                     name="subconscious-panel",
                     props={"stage": event.stage},
                 ))
