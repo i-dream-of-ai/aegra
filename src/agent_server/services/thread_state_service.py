@@ -27,6 +27,15 @@ class ThreadStateService:
             next_nodes = getattr(snapshot, "next", []) or []
             metadata = getattr(snapshot, "metadata", {}) or {}
             created_at = self._extract_created_at(snapshot)
+            
+            # Debug: Log the keys in values to see if 'ui' is present
+            logger.debug(
+                "Snapshot values keys",
+                thread_id=thread_id,
+                value_keys=list(values.keys()) if isinstance(values, dict) else "not_a_dict",
+                has_ui="ui" in values if isinstance(values, dict) else False,
+                ui_count=len(values.get("ui", [])) if isinstance(values, dict) else 0,
+            )
 
             # Extract tasks and interrupts using serializer
             tasks = self.serializer.extract_tasks_from_snapshot(snapshot)
