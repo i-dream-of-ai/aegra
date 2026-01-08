@@ -1137,6 +1137,12 @@ async def execute_run_async(
         # Extract project IDs from config metadata (sent by frontend)
         # Frontend sends: metadata: { project_id: "uuid", qc_project_id: 123 }
         config_metadata = (config or {}).get("metadata", {})
+        logger.info(
+            "Extracting project config",
+            config_keys=list((config or {}).keys()),
+            metadata_keys=list(config_metadata.keys()),
+            has_project_id=bool(config_metadata.get("project_id")),
+        )
         if config_metadata.get("project_id"):
             graph_context.setdefault("project_db_id", config_metadata["project_id"])
         if config_metadata.get("qc_project_id"):
@@ -1151,6 +1157,7 @@ async def execute_run_async(
         # Fetch project config from DB (model, prompts, thinking_budget, etc.)
         # This is used by dynamic_model_middleware and dynamic_system_prompt
         project_db_id = graph_context.get("project_db_id")
+        logger.info("Project DB ID for config fetch", project_db_id=project_db_id)
         if project_db_id:
             project_config = await fetch_project_config(project_db_id)
             # Merge project config into graph context (don't override explicit values)
