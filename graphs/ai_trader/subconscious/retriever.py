@@ -59,15 +59,16 @@ def format_skill_content(skill: dict) -> str:
 
 async def retrieve_skills_by_keywords(
     keywords: list[str],
-    access_token: str,
+    access_token: str,  # Kept for API compatibility but not used - we use service key
     limit: int = 7,
 ) -> list[RetrievedSkill]:
     """
     Retrieve skills by keyword/tag matching.
     Uses GIN index on tags column for fast lookup.
+    Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
     if not supabase_url or not keywords:
         return []
@@ -83,8 +84,8 @@ async def retrieve_skills_by_keywords(
         "limit": str(limit),
     }
     headers = {
-        "Authorization": f"Bearer {access_token}",
-        "apikey": supabase_anon_key,
+        "Authorization": f"Bearer {service_key}",
+        "apikey": service_key,
         "Content-Type": "application/json",
     }
 
@@ -119,15 +120,16 @@ async def retrieve_skills_by_keywords(
 
 async def retrieve_skills_by_embedding(
     query: str,
-    access_token: str,
+    access_token: str,  # Kept for API compatibility but not used - we use service key
     limit: int = 5,
     min_similarity: float = 0.3,
 ) -> list[RetrievedSkill]:
     """
     Retrieve skills by semantic similarity using pgvector.
+    Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
     if not supabase_url or not query:
         return []
@@ -139,8 +141,8 @@ async def retrieve_skills_by_embedding(
         # Call the match_skills RPC function
         url = f"{supabase_url}/rest/v1/rpc/match_skills"
         headers = {
-            "Authorization": f"Bearer {access_token}",
-            "apikey": supabase_anon_key,
+            "Authorization": f"Bearer {service_key}",
+            "apikey": service_key,
             "Content-Type": "application/json",
         }
         payload = {
@@ -179,14 +181,15 @@ async def retrieve_skills_by_embedding(
 
 
 async def retrieve_always_skills(
-    access_token: str,
+    access_token: str,  # Kept for API compatibility but not used - we use service key
 ) -> list[RetrievedSkill]:
     """
     Retrieve Level 3 (always-inject) skills.
     These are critical instincts that should always be considered.
+    Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
     if not supabase_url:
         return []
@@ -199,8 +202,8 @@ async def retrieve_always_skills(
         "limit": "10",
     }
     headers = {
-        "Authorization": f"Bearer {access_token}",
-        "apikey": supabase_anon_key,
+        "Authorization": f"Bearer {service_key}",
+        "apikey": service_key,
         "Content-Type": "application/json",
     }
 
