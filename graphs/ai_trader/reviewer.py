@@ -66,6 +66,36 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
         }
         model = ChatOpenAI(**model_kwargs)
 
+    # Import and bind tools - gives Deacon the ability to run backtests
+    from .tools import (
+        qc_read_file,
+        qc_edit_and_run_backtest,
+        qc_update_and_run_backtest,
+        qc_compile_and_backtest,
+        get_code_versions,
+        get_code_version,
+        read_backtest,
+        read_project_nodes,
+        read_optimization,
+        list_backtests,
+    )
+    
+    reviewer_tools = [
+        qc_read_file,
+        qc_edit_and_run_backtest,
+        qc_update_and_run_backtest,
+        qc_compile_and_backtest,
+        get_code_versions,
+        get_code_version,
+        read_backtest,
+        read_project_nodes,
+        read_optimization,
+        list_backtests,
+    ]
+    
+    # Bind tools to model
+    model_with_tools = model.bind_tools(reviewer_tools)
+
     # Build messages - reviewer sees the full conversation history
     # Sanitize message names for OpenAI compatibility (OpenAI rejects spaces and certain chars)
     def sanitize_name(name: str) -> str:
@@ -73,7 +103,7 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
             return name
         # Replace spaces and invalid chars: \s, <, |, \, /, >
         import re
-        return re.sub(r'[\s<|\\/>]', '_', name)
+        return re.sub(r'[\s<|\\/>\(\)\[\]\{\}]', '_', name)
     
     # Filter out tool-related messages - OpenAI requires tool_calls to have matching
     # tool responses, but the reviewer is a separate model call that doesn't have them
@@ -98,8 +128,8 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
     
     messages = [SystemMessage(content=reviewer_prompt)] + sanitized_messages
 
-    # Invoke the model
-    response = await model.ainvoke(messages)
+    # Invoke the model with tools bound
+    response = await model_with_tools.ainvoke(messages)
 
     return {"messages": [response]}
 
