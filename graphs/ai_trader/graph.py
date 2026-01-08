@@ -365,8 +365,6 @@ He operates in isolated context and returns a focused review.""",
 graph = create_deep_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
-    state_schema=AITraderState,
-    context_schema=Context,
     subagents=[REVIEWER_SUBAGENT],
     middleware=[
         # Built-in: Summarization at 100K tokens, keep 20 messages
