@@ -33,8 +33,8 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
 
     # Get reviewer configuration
     # Get reviewer configuration
-    # Priority: 1. Context (User override), 2. OPENAI_MODEL env var, 3. Default fallback (Fine-Tuned)
-    default_model = os.environ.get("OPENAI_MODEL", "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q")
+    # Priority: 1. Context (User override), 2. REVIEWER_MODEL env var, 3. Default fallback (Fine-Tuned)
+    default_model = os.environ.get("REVIEWER_MODEL", "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q")
     
     reviewer_model = ctx.get("reviewer_model") or default_model
     reviewer_prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
