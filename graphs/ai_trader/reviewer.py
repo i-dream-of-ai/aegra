@@ -1,223 +1,101 @@
 """
 Doubtful Deacon - Chief Quant Strategist & Algorithm Auditor
 
-A full ReAct agent that can run backtests, analyze results, and iterate on improvements.
-Uses create_agent for proper tool execution loop - not just suggestions.
+A skeptical reviewer agent that critiques algorithm code and provides feedback.
+Runs as a subgraph with streaming support.
 """
 
 import os
-import re
-from typing import Any, Callable
 
 import structlog
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    dynamic_prompt,
-    wrap_model_call,
-    before_model,
-    ModelRequest,
-    ModelResponse,
-    AgentState,
-)
-from langchain.chat_models import init_chat_model
-from langchain.messages import SystemMessage
-from langchain_core.messages import ToolMessage
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import RetryPolicy
 
 from .context import Context
 from .prompts import DEFAULT_REVIEWER_PROMPT
-
-# Import tools for the reviewer
-from .tools import (
-    qc_read_file,
-    qc_edit_and_run_backtest,
-    qc_update_and_run_backtest,
-    qc_compile_and_backtest,
-    get_code_versions,
-    get_code_version,
-    read_backtest,
-    read_project_nodes,
-    read_optimization,
-    list_backtests,
-    list_optimizations,
-    read_backtest_orders,
-)
+from .state import InputState, State
 
 logger = structlog.getLogger(__name__)
 
-# Reviewer tools - core subset for analysis and testing
-REVIEWER_TOOLS = [
-    qc_read_file,
-    qc_edit_and_run_backtest,
-    qc_update_and_run_backtest,
-    qc_compile_and_backtest,
-    get_code_versions,
-    get_code_version,
-    read_backtest,
-    read_backtest_orders,
-    read_project_nodes,
-    read_optimization,
-    list_optimizations,
-    list_backtests,
-]
 
+async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
+    """
+    Reviewer agent node - analyzes the conversation and provides critique.
 
-# =============================================================================
-# Middleware: Dynamic Model Selection for Reviewer
-# =============================================================================
+    The reviewer sees the filtered message history (without tool calls)
+    and responds with its analysis.
+    """
+    ctx = runtime.context
 
-@wrap_model_call
-async def reviewer_model_selection(
-    request: ModelRequest,
-    handler: Callable[[ModelRequest], ModelResponse],
-) -> ModelResponse:
-    """Select reviewer model dynamically based on context."""
-    ctx = request.runtime.context or {}
-    
-    # Priority: context override > env var > default fine-tuned model
+    # Get reviewer configuration
+    # Priority: 1. Context (User override), 2. REVIEWER_MODEL env var, 3. Default fallback
     default_model = os.environ.get(
         "REVIEWER_MODEL", 
         "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"
     )
-    model_name = ctx.get("reviewer_model") or default_model
     
-    # Determine model provider - fine-tuned models need explicit provider
-    if model_name.startswith("ft:") or model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3"):
-        model_provider = "openai"
-    elif model_name.startswith("claude"):
-        model_provider = "anthropic"
+    reviewer_model = ctx.get("reviewer_model") or default_model
+    reviewer_prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
+    reviewer_thinking_budget = ctx.get("reviewer_thinking_budget") or 0
+
+    # Build the model
+    is_claude = reviewer_model.startswith("claude")
+
+    if is_claude:
+        model_kwargs = {
+            "model": reviewer_model,
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
+            "max_tokens": 4096,
+        }
+
+        if reviewer_thinking_budget > 0:
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": reviewer_thinking_budget,
+            }
+            model_kwargs["max_tokens"] = max(4096, reviewer_thinking_budget + 2048)
+
+        model = ChatAnthropic(**model_kwargs)
     else:
-        model_provider = None  # Let init_chat_model infer
-    
-    model = init_chat_model(model_name, model_provider=model_provider)
-    
-    # Apply Claude thinking budget if set
-    if model_name.startswith("claude"):
-        thinking_budget = ctx.get("reviewer_thinking_budget") or 0
-        if thinking_budget > 0:
-            model = model.bind(
-                thinking={"type": "enabled", "budget_tokens": thinking_budget}
-            )
-    
-    # Bind tools to model
-    model = model.bind_tools(REVIEWER_TOOLS)
-    
-    # Update request with new model
-    request.model = model
-    return await handler(request)
+        model_kwargs = {
+            "model": reviewer_model,
+            "api_key": os.environ.get("OPENAI_API_KEY"),
+            "max_tokens": 4096,
+        }
+        model = ChatOpenAI(**model_kwargs)
+
+    # Messages are already filtered by the calling tool (review.py)
+    # Just add the system prompt and invoke
+    messages = [SystemMessage(content=reviewer_prompt)] + list(state.messages)
+
+    # Invoke the model
+    response = await model.ainvoke(messages)
+
+    return {"messages": [response]}
 
 
-# =============================================================================
-# Middleware: Dynamic System Prompt for Reviewer
-# =============================================================================
-
-@dynamic_prompt
-def reviewer_system_prompt(state: AgentState, *args, **kwargs) -> str:
-    """Build the reviewer system prompt."""
-    # Defensive logic: Check if first arg is ModelRequest (has runtime) or State (dict)
-    ctx = {}
-    if args:
-        arg0 = args[0]
-        # Case 1: ModelRequest (Middleware usage)
-        if hasattr(arg0, "runtime") and hasattr(arg0.runtime, "context"):
-            ctx = arg0.runtime.context or {}
-        # Case 2: Dict/State (Direct usage)
-        elif hasattr(arg0, "get"):
-            ctx = arg0
-        # Case 3: Runtime object directly
-        elif hasattr(arg0, "context"):
-            ctx = arg0.context or {}
-        # Case 4: RunnableConfig
-        elif isinstance(arg0, dict) and "configurable" in arg0:
-            ctx = arg0.get("configurable", {})
-
-    # Fallback to kwargs if needed
-    if not ctx and "config" in kwargs:
-        cfg = kwargs["config"]
-        ctx = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
-
-    prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
-    return prompt
-
-
-# =============================================================================
-# Middleware: Sanitize Messages (filter out main agent's tool calls)
-# =============================================================================
-
-@before_model
-def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
-    """
-    Filter out tool-related messages from main agent's history.
-    
-    The reviewer is a separate agent that doesn't have matching tool responses
-    for the main agent's tool_calls. OpenAI requires tool_calls to have matching
-    responses, so we filter them out entirely.
-    """
-    messages = list(state["messages"])
-    if not messages:
-        return None
-    
-    # Sanitize message names for OpenAI (no spaces, special chars)
-    def sanitize_name(name: str) -> str:
-        if not name:
-            return name
-        return re.sub(r'[\s<|\\/\>\(\)\[\]\{\}]', '_', name)
-    
-    sanitized = []
-    for msg in messages:
-        # Skip ToolMessage (tool responses from main agent)
-        if isinstance(msg, ToolMessage):
-            continue
-        # Skip AIMessage with tool_calls (main agent's tool calls)
-        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            continue
-        
-        # Sanitize message name if present
-        if hasattr(msg, 'name') and msg.name:
-            msg_copy = msg.model_copy()
-            msg_copy.name = sanitize_name(msg.name)
-            sanitized.append(msg_copy)
-        else:
-            sanitized.append(msg)
-    
-    # Only update if we filtered something
-    if len(sanitized) != len(messages):
-        return {"messages": sanitized}
-    return None
-
-
-# =============================================================================
-# Create Reviewer Agent with Full ReAct Loop
-# =============================================================================
-
-# Default reviewer model
-DEFAULT_REVIEWER_MODEL = os.environ.get(
-    "REVIEWER_MODEL",
-    "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"
-)
-
-# Determine model provider for default model and initialize
-if DEFAULT_REVIEWER_MODEL.startswith("ft:") or DEFAULT_REVIEWER_MODEL.startswith("gpt") or DEFAULT_REVIEWER_MODEL.startswith("o1") or DEFAULT_REVIEWER_MODEL.startswith("o3"):
-    _model_provider = "openai"
-elif DEFAULT_REVIEWER_MODEL.startswith("claude"):
-    _model_provider = "anthropic"
-else:
-    _model_provider = None
-
-# Initialize the model object with explicit provider
-_default_model = init_chat_model(DEFAULT_REVIEWER_MODEL, model_provider=_model_provider)
-
-# Create reviewer agent with tools and ReAct loop
-reviewer_graph = create_agent(
-    model=_default_model,
-    tools=REVIEWER_TOOLS,
-    state_schema=AgentState,
+# Build the reviewer subgraph
+reviewer_builder = StateGraph(
+    State,
+    input_schema=InputState,
     context_schema=Context,
-    middleware=[
-        sanitize_messages_for_reviewer,  # Filter out main agent's tool calls
-        reviewer_model_selection,
-        reviewer_system_prompt,
-    ],
-    name="Doubtful_Deacon",
 )
 
+# Retry policy for LLM calls - handles transient API errors
+llm_retry_policy = RetryPolicy(
+    max_attempts=3,
+    initial_interval=2.0,
+    backoff_factor=2.0,
+    max_interval=30.0,
+)
+
+reviewer_builder.add_node("review", review_node, retry=llm_retry_policy)
+reviewer_builder.add_edge("__start__", "review")
+reviewer_builder.add_edge("review", "__end__")
+
+# Compile with name for UI display
+reviewer_graph = reviewer_builder.compile(name="Doubtful_Deacon")
