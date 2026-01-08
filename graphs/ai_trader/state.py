@@ -11,6 +11,7 @@ from typing import Annotated
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
+from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 from langgraph.managed import IsLastStep
 
 
@@ -74,4 +75,14 @@ class State(InputState):
     Contains running summary from SummarizationNode.
     Used to preserve context when conversation history gets too long.
     Structure: {"running_summary": RunningSummary} when summarization has occurred.
+    """
+
+    # Generative UI messages from push_ui_message() calls in tools
+    ui: Annotated[Sequence[AnyUIMessage], ui_message_reducer] = field(
+        default_factory=list
+    )
+    """
+    UI messages emitted by tools via push_ui_message().
+    These are rendered as custom components in the frontend chat UI.
+    The ui_message_reducer handles merging/updating UI messages by ID.
     """
