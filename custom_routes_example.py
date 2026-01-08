@@ -31,12 +31,18 @@ You can also configure authentication and CORS:
 
 from fastapi import FastAPI, HTTPException
 
+# Import config router from Aegra's agent server
+from src.agent_server.api.config import router as config_router
+
 # Create your FastAPI app instance
 # This will be merged with Aegra's core routes
 app = FastAPI(
     title="Custom Routes",
     description="Custom endpoints for Aegra",
 )
+
+# Include config routes (agent configs, model configs, etc.)
+app.include_router(config_router, tags=["Config"])
 
 
 @app.get("/custom/hello")
