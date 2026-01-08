@@ -24,7 +24,9 @@ import typing
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 import structlog
-from deepagents import create_deep_agent, CompiledSubAgent
+from langchain.agents import create_agent
+from deepagents import CompiledSubAgent
+from deepagents.middleware.subagents import SubAgentMiddleware
 from langchain.agents.middleware import (
     SummarizationMiddleware,
     ContextEditingMiddleware,
@@ -36,7 +38,7 @@ from langchain.agents.middleware import (
     ModelResponse,
     AgentState,
 )
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
 from langchain.messages import SystemMessage
 from langchain_core.messages import ToolMessage
 from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
@@ -342,7 +344,7 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
 
 # Default model from environment
 DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
-DEFAULT_MODEL = init_chat_model(model=DEFAULT_MODEL_NAME)
+DEFAULT_MODEL = ChatOpenAI(model=DEFAULT_MODEL_NAME)
 
 # Configure the reviewer as a subagent
 REVIEWER_SUBAGENT = CompiledSubAgent(
