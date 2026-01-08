@@ -344,8 +344,8 @@ async def read_optimization(
             "results": results,
         }
         
-        # Emit optimization results UI component via generative UI
-        push_ui_message("optimization-results", ui_data)
+        # Emit optimization results UI component via generative UI (linked to tool call message)
+        push_ui_message("optimization-results", ui_data, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {

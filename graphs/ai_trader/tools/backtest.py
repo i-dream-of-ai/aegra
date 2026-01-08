@@ -137,8 +137,8 @@ async def read_backtest(
             },
         }
         
-        # Emit UI component via generative UI
-        push_ui_message("backtest-stats", ui_data)
+        # Emit UI component via generative UI (linked to tool call message)
+        push_ui_message("backtest-stats", ui_data, message={"id": runtime.tool_call_id})
 
         # Return JSON for LLM context (legacy compatibility)
         return json.dumps(
@@ -267,8 +267,8 @@ async def read_backtest_chart(
             "series": series,
         }
         
-        # Emit chart UI component via generative UI
-        push_ui_message("chart", ui_data)
+        # Emit chart UI component via generative UI (linked to tool call message)
+        push_ui_message("chart", ui_data, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
