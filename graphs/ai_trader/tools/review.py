@@ -72,6 +72,16 @@ async def request_code_review(
     # Invoke the reviewer subgraph with filtered state
     result = await reviewer_graph.ainvoke(filtered_state)
     
+    # Debug logging to see what the reviewer returns
+    import structlog
+    logger = structlog.getLogger(__name__)
+    logger.info(
+        "Reviewer result",
+        result_type=type(result).__name__,
+        result_keys=list(result.keys()) if isinstance(result, dict) else None,
+        messages_count=len(result.get("messages", [])) if isinstance(result, dict) else None,
+    )
+    
     # The result contains the full state of the subgraph
     # We want to extract the reviewer's response message
     reviewer_messages = result.get("messages", [])
