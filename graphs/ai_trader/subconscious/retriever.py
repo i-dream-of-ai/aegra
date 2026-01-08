@@ -68,7 +68,7 @@ async def retrieve_skills_by_keywords(
     Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url or not keywords:
         return []
@@ -129,7 +129,7 @@ async def retrieve_skills_by_embedding(
     Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url or not query:
         return []
@@ -189,7 +189,7 @@ async def retrieve_always_skills(
     Uses service key for auth since skills are shared (not user-specific).
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url:
         return []
