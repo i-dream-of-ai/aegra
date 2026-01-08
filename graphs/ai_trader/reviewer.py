@@ -13,12 +13,15 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     dynamic_prompt,
     wrap_model_call,
+    before_model,
     ModelRequest,
     ModelResponse,
     AgentState,
 )
 from langchain.chat_models import init_chat_model
 from langchain.messages import SystemMessage
+from langchain_core.messages import ToolMessage
+from langgraph.runtime import Runtime
 
 from .context import Context
 from .prompts import DEFAULT_REVIEWER_PROMPT
@@ -137,6 +140,54 @@ def reviewer_system_prompt(state: AgentState, *args, **kwargs) -> str:
 
 
 # =============================================================================
+# Middleware: Sanitize Messages (filter out main agent's tool calls)
+# =============================================================================
+
+@before_model
+def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict | None:
+    """
+    Filter out tool-related messages from main agent's history.
+    
+    The reviewer is a separate agent that doesn't have matching tool responses
+    for the main agent's tool_calls. OpenAI requires tool_calls to have matching
+    responses, so we filter them out entirely.
+    """
+    import re
+    
+    messages = list(state.get("messages", []))
+    if not messages:
+        return None
+    
+    # Sanitize message names for OpenAI (no spaces, special chars)
+    def sanitize_name(name: str) -> str:
+        if not name:
+            return name
+        return re.sub(r'[\s<|\\/>\(\)\[\]\{\}]', '_', name)
+    
+    sanitized = []
+    for msg in messages:
+        # Skip ToolMessage (tool responses from main agent)
+        if isinstance(msg, ToolMessage):
+            continue
+        # Skip AIMessage with tool_calls (main agent's tool calls)
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            continue
+        
+        # Sanitize message name if present
+        if hasattr(msg, 'name') and msg.name:
+            msg_copy = msg.model_copy()
+            msg_copy.name = sanitize_name(msg.name)
+            sanitized.append(msg_copy)
+        else:
+            sanitized.append(msg)
+    
+    # Only update if we filtered something
+    if len(sanitized) != len(messages):
+        return {"messages": sanitized}
+    return None
+
+
+# =============================================================================
 # Create Reviewer Agent with Full ReAct Loop
 # =============================================================================
 
@@ -164,6 +215,7 @@ reviewer_graph = create_agent(
     state_schema=AgentState,
     context_schema=Context,
     middleware=[
+        sanitize_messages_for_reviewer,  # Filter out main agent's tool calls
         reviewer_model_selection,
         reviewer_system_prompt,
     ],
