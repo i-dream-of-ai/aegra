@@ -128,16 +128,20 @@ DEFAULT_REVIEWER_MODEL = os.environ.get(
     "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"
 )
 
-# Determine model provider for default model
-if DEFAULT_REVIEWER_MODEL.startswith("ft:") or DEFAULT_REVIEWER_MODEL.startswith("gpt"):
-    _MODEL_PROVIDER = "openai"
+# Determine model provider for default model and initialize
+if DEFAULT_REVIEWER_MODEL.startswith("ft:") or DEFAULT_REVIEWER_MODEL.startswith("gpt") or DEFAULT_REVIEWER_MODEL.startswith("o1") or DEFAULT_REVIEWER_MODEL.startswith("o3"):
+    _model_provider = "openai"
+elif DEFAULT_REVIEWER_MODEL.startswith("claude"):
+    _model_provider = "anthropic"
 else:
-    _MODEL_PROVIDER = None
+    _model_provider = None
+
+# Initialize the model object with explicit provider
+_default_model = init_chat_model(DEFAULT_REVIEWER_MODEL, model_provider=_model_provider)
 
 # Create reviewer agent with tools and ReAct loop
 reviewer_graph = create_agent(
-    model=DEFAULT_REVIEWER_MODEL,
-    model_provider=_MODEL_PROVIDER,
+    model=_default_model,
     tools=REVIEWER_TOOLS,
     state_schema=AgentState,
     context_schema=Context,
