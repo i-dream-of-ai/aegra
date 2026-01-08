@@ -355,5 +355,5 @@ graph = create_agent(
         # Custom: Patch dangling tool calls
         patch_dangling_tool_calls,
     ],
-    name="AI Trader",
+    name="AI_Trader",
 )
