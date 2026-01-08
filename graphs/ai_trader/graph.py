@@ -117,10 +117,31 @@ async def dynamic_model_selection(
             )
     
     # Apply OpenAI reasoning effort if set
-    elif model_name.startswith("gpt"):
+    elif model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3") or model_name.startswith("ft:"):
         reasoning_effort = ctx.get("reasoning_effort")
         if reasoning_effort and reasoning_effort != "none":
             model = model.bind(reasoning_effort=reasoning_effort)
+        
+        # OpenAI has strict validation on message names - sanitize them
+        # Pattern: ^[^\s<|\\/>]+$ (no whitespace, <, |, \, /, >)
+        import re
+        def sanitize_name(name: str) -> str:
+            if not name:
+                return name
+            return re.sub(r'[\s<|\\/>]', '_', name)
+        
+        # Sanitize message names in the request
+        sanitized_messages = []
+        for msg in request.messages:
+            if hasattr(msg, 'name') and msg.name:
+                msg_copy = msg.model_copy()
+                msg_copy.name = sanitize_name(msg.name)
+                sanitized_messages.append(msg_copy)
+            else:
+                sanitized_messages.append(msg)
+        
+        # Override request with sanitized messages
+        request = request.override(messages=sanitized_messages)
     
     logger.info("Dynamic model selection", model=model_name)
     return await handler(request.override(model=model))
