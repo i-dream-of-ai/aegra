@@ -6,7 +6,8 @@ Uses create_agent for proper tool execution loop - not just suggestions.
 """
 
 import os
-from typing import Callable
+import re
+from typing import Any, Callable
 
 import structlog
 from langchain.agents import create_agent
@@ -144,7 +145,7 @@ def reviewer_system_prompt(state: AgentState, *args, **kwargs) -> str:
 # =============================================================================
 
 @before_model
-def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict | None:
+def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     """
     Filter out tool-related messages from main agent's history.
     
@@ -152,9 +153,7 @@ def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict 
     for the main agent's tool_calls. OpenAI requires tool_calls to have matching
     responses, so we filter them out entirely.
     """
-    import re
-    
-    messages = list(state.get("messages", []))
+    messages = list(state["messages"])
     if not messages:
         return None
     
@@ -162,7 +161,7 @@ def sanitize_messages_for_reviewer(state: AgentState, runtime: Runtime) -> dict 
     def sanitize_name(name: str) -> str:
         if not name:
             return name
-        return re.sub(r'[\s<|\\/>\(\)\[\]\{\}]', '_', name)
+        return re.sub(r'[\s<|\\/\>\(\)\[\]\{\}]', '_', name)
     
     sanitized = []
     for msg in messages:
