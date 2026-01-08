@@ -77,7 +77,15 @@ async def reviewer_model_selection(
     )
     model_name = ctx.get("reviewer_model") or default_model
     
-    model = init_chat_model(model_name)
+    # Determine model provider - fine-tuned models need explicit provider
+    if model_name.startswith("ft:") or model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3"):
+        model_provider = "openai"
+    elif model_name.startswith("claude"):
+        model_provider = "anthropic"
+    else:
+        model_provider = None  # Let init_chat_model infer
+    
+    model = init_chat_model(model_name, model_provider=model_provider)
     
     # Apply Claude thinking budget if set
     if model_name.startswith("claude"):
@@ -120,9 +128,16 @@ DEFAULT_REVIEWER_MODEL = os.environ.get(
     "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"
 )
 
+# Determine model provider for default model
+if DEFAULT_REVIEWER_MODEL.startswith("ft:") or DEFAULT_REVIEWER_MODEL.startswith("gpt"):
+    _MODEL_PROVIDER = "openai"
+else:
+    _MODEL_PROVIDER = None
+
 # Create reviewer agent with tools and ReAct loop
 reviewer_graph = create_agent(
     model=DEFAULT_REVIEWER_MODEL,
+    model_provider=_MODEL_PROVIDER,
     tools=REVIEWER_TOOLS,
     state_schema=AgentState,
     context_schema=Context,
