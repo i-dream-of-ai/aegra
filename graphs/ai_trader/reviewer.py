@@ -33,10 +33,10 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
 
     # Get reviewer configuration
     # Get reviewer configuration
-    # Context is a TypedDict so we must use .get()
-    reviewer_model = ctx.get("reviewer_model") or os.environ.get(
-        "OPENAI_MODEL"
-    ) or "gpt-4o"
+    # Priority: 1. Context (User override), 2. OPENAI_MODEL env var (Fine-tuned), 3. Default fallback
+    default_model = os.environ.get("OPENAI_MODEL", "gpt-5.2")
+    
+    reviewer_model = ctx.get("reviewer_model") or default_model
     reviewer_prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
     reviewer_thinking_budget = ctx.get("reviewer_thinking_budget") or 0
 
