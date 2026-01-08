@@ -77,11 +77,32 @@ async def request_code_review(
     reviewer_messages = result.get("messages", [])
     if not reviewer_messages:
         return "Reviewer completed but returned no messages."
-        
-    last_message = reviewer_messages[-1]
+    
+    # Find the last AI message with actual content (skip tool calls)
+    last_content = None
+    for msg in reversed(reviewer_messages):
+        # Get content attribute safely
+        content = getattr(msg, 'content', None)
+        if content and isinstance(content, str) and content.strip():
+            last_content = content
+            break
+        # Also check for dict-style messages
+        if isinstance(msg, dict) and msg.get('content'):
+            last_content = msg['content']
+            break
     
     # Return the content of the review
-    return last_message.content
+    if last_content:
+        return last_content
+    
+    # Fallback: try to get any content from last message
+    last_message = reviewer_messages[-1]
+    if hasattr(last_message, 'content') and last_message.content:
+        return str(last_message.content)
+    if isinstance(last_message, dict):
+        return last_message.get('content', 'Reviewer completed but message had no content.')
+    
+    return "Reviewer completed but could not extract response content."
 
 
 # Export tools
