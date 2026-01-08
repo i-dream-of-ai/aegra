@@ -24,7 +24,7 @@ import typing
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 import structlog
-from langchain.agents import create_agent
+from deepagents import create_deep_agent, CompiledSubAgent
 from langchain.agents.middleware import (
     SummarizationMiddleware,
     ContextEditingMiddleware,
@@ -60,11 +60,12 @@ from graphs.ai_trader.tools.files import TOOLS as FILES_TOOLS
 from graphs.ai_trader.tools.misc import TOOLS as MISC_TOOLS
 from graphs.ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
 from graphs.ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
-from graphs.ai_trader.tools.review import TOOLS as REVIEW_TOOLS
+# Import reviewer graph for subagent configuration
+from graphs.ai_trader.reviewer import reviewer_graph
 
 logger = structlog.getLogger(__name__)
 
-# Combine all tools
+# Combine all tools (excluding REVIEW_TOOLS - reviewer is now a subagent)
 ALL_TOOLS = (
     FILES_TOOLS
     + BACKTEST_TOOLS
@@ -74,7 +75,6 @@ ALL_TOOLS = (
     + OBJECT_STORE_TOOLS
     + AI_SERVICES_TOOLS
     + MISC_TOOLS
-    + REVIEW_TOOLS
 )
 
 
@@ -337,18 +337,37 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
 
 
 # =============================================================================
-# Create Agent with Middleware
+# Create Agent with Middleware and Subagents
 # =============================================================================
 
 # Default model from environment
 DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
 
-# Create agent with all middleware
-graph = create_agent(
+# Configure the reviewer as a subagent
+REVIEWER_SUBAGENT = CompiledSubAgent(
+    name="code-reviewer",
+    description="""Doubtful Deacon - Chief Quant Strategist & Algorithm Auditor.
+
+Use this subagent when you need:
+- Code review of trading algorithms
+- Analysis of backtest results
+- Critique of strategy logic and edge cases
+- Trading recommendations and testable experiments
+- Second opinion on algorithm implementation
+
+Deacon is a skeptical expert who will analyze the code, spot potential bugs,
+identify QuantConnect/LEAN pitfalls, and suggest concrete improvements.
+He operates in isolated context and returns a focused review.""",
+    runnable=reviewer_graph,
+)
+
+# Create deep agent with all middleware and subagents
+graph = create_deep_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     state_schema=AITraderState,
     context_schema=Context,
+    subagents=[REVIEWER_SUBAGENT],
     middleware=[
         # Built-in: Summarization at 100K tokens, keep 20 messages
         SummarizationMiddleware(
