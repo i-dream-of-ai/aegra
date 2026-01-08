@@ -3,6 +3,7 @@
 import json
 
 from langchain.tools import tool, ToolRuntime
+from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
@@ -35,6 +36,14 @@ async def qc_create_file(
                 "content": content,
             },
         )
+
+        # Emit file-operation UI
+        push_ui_message("file-operation", {
+            "operation": "create",
+            "fileName": file_name,
+            "success": True,
+            "message": f"File '{file_name}' created successfully.",
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
@@ -91,6 +100,13 @@ async def qc_read_file(
                         "content": f.get("content"),
                     }
                 )
+            
+            # Emit file-list UI
+            push_ui_message("file-list", {
+                "files": [{"name": f["name"], "lines": len(f.get("content", "").split("\n"))} for f in file_list],
+                "count": len(file_list),
+            }, message={"id": runtime.tool_call_id})
+            
             return json.dumps(
                 {
                     "success": True,
@@ -102,6 +118,14 @@ async def qc_read_file(
         # Single file
         file_data = files[0] if isinstance(files, list) else files
         content = file_data.get("content", "")
+
+        # Emit file-content UI
+        push_ui_message("file-content", {
+            "fileName": file_name,
+            "content": content[:2000] if len(content) > 2000 else content,
+            "truncated": len(content) > 2000,
+            "lines": len(content.split("\n")),
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
@@ -143,6 +167,15 @@ async def qc_update_file(
                 "content": content,
             },
         )
+
+        # Emit file-operation UI
+        push_ui_message("file-operation", {
+            "operation": "update",
+            "fileName": file_name,
+            "success": True,
+            "message": f"File '{file_name}' updated successfully.",
+            "lines": len(content.split("\n")),
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
@@ -189,6 +222,15 @@ async def qc_rename_file(
             },
         )
 
+        # Emit file-operation UI
+        push_ui_message("file-operation", {
+            "operation": "rename",
+            "oldFileName": old_file_name,
+            "newFileName": new_file_name,
+            "success": True,
+            "message": f"Renamed '{old_file_name}' to '{new_file_name}'.",
+        }, message={"id": runtime.tool_call_id})
+
         return json.dumps(
             {
                 "success": True,
@@ -229,6 +271,14 @@ async def qc_delete_file(
             "/files/delete",
             {"projectId": qc_project_id, "name": file_name},
         )
+
+        # Emit file-operation UI
+        push_ui_message("file-operation", {
+            "operation": "delete",
+            "fileName": file_name,
+            "success": True,
+            "message": f"File '{file_name}' deleted successfully.",
+        }, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
