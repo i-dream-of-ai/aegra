@@ -363,36 +363,18 @@ He operates in isolated context and returns a focused review.""",
 )
 
 # Create deep agent with all middleware and subagents
+# Note: create_deep_agent has built-in summarization and dangling tool repair
 graph = create_deep_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     subagents=[REVIEWER_SUBAGENT],
     middleware=[
-        # Built-in: Summarization at 100K tokens, keep 20 messages
-        SummarizationMiddleware(
-            model="gpt-4o-mini",
-            trigger=("tokens", 100000),
-            keep=("messages", 20),
-        ),
-        # Built-in: Clear older tool outputs, keep last 8 results
-        ContextEditingMiddleware(
-            edits=[
-                ClearToolUsesEdit(
-                    trigger=80000,  # Trigger at 80K tokens
-                    keep=8,  # Keep last 8 tool results
-                    clear_tool_inputs=False,  # Preserve tool call arguments
-                    placeholder="[cleared]",
-                ),
-            ],
-        ),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious
         build_system_prompt,
         # Custom: Subconscious injection
         inject_subconscious,
-        # Custom: Patch dangling tool calls
-        patch_dangling_tool_calls,
     ],
     name="AI_Trader",
 )
