@@ -95,4 +95,4 @@ reviewer_builder.add_edge("__start__", "review")
 reviewer_builder.add_edge("review", "__end__")
 
 # Compile with name for UI display
-reviewer_graph = reviewer_builder.compile(name="Doubtful Deacon")
+reviewer_graph = reviewer_builder.compile(name="Doubtful_Deacon")
