@@ -260,6 +260,17 @@ async def read_optimization(
             all_backtests = backtests_raw
         else:
             all_backtests = []
+        
+        # Debug: Log the structure of first backtest to understand format
+        sample_backtest = all_backtests[0] if all_backtests else None
+        debug_info = {
+            "backtests_type": type(backtests_raw).__name__,
+            "backtests_count": len(all_backtests),
+            "sample_keys": list(sample_backtest.keys()) if sample_backtest else [],
+            "sample_stats_type": type(sample_backtest.get("statistics")).__name__ if sample_backtest else None,
+            "sample_stats_length": len(sample_backtest.get("statistics", [])) if sample_backtest and isinstance(sample_backtest.get("statistics"), (list, dict)) else 0,
+            "sample_stats_preview": sample_backtest.get("statistics", [])[:5] if sample_backtest and isinstance(sample_backtest.get("statistics"), list) else sample_backtest.get("statistics") if sample_backtest else None,
+        }
 
         # Sort by Sharpe ratio (index 15 in stats array)
         def get_sharpe(bt):
@@ -370,6 +381,7 @@ async def read_optimization(
                     "has_more_pages": page < total_pages,
                 },
                 "results": results,
+                "_debug": debug_info,  # Temporary: shows what QC returns for stats
             },
             indent=2,
         )
