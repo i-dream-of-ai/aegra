@@ -108,14 +108,32 @@ async def reviewer_model_selection(
 # =============================================================================
 
 @dynamic_prompt
-async def reviewer_system_prompt(
-    state: AgentState,
-    runtime,
-) -> SystemMessage:
+def reviewer_system_prompt(state: AgentState, *args, **kwargs) -> str:
     """Build the reviewer system prompt."""
-    ctx = runtime.context or {}
+    # Defensive logic: Check if first arg is ModelRequest (has runtime) or State (dict)
+    ctx = {}
+    if args:
+        arg0 = args[0]
+        # Case 1: ModelRequest (Middleware usage)
+        if hasattr(arg0, "runtime") and hasattr(arg0.runtime, "context"):
+            ctx = arg0.runtime.context or {}
+        # Case 2: Dict/State (Direct usage)
+        elif hasattr(arg0, "get"):
+            ctx = arg0
+        # Case 3: Runtime object directly
+        elif hasattr(arg0, "context"):
+            ctx = arg0.context or {}
+        # Case 4: RunnableConfig
+        elif isinstance(arg0, dict) and "configurable" in arg0:
+            ctx = arg0.get("configurable", {})
+
+    # Fallback to kwargs if needed
+    if not ctx and "config" in kwargs:
+        cfg = kwargs["config"]
+        ctx = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
+
     prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
-    return SystemMessage(content=prompt)
+    return prompt
 
 
 # =============================================================================
