@@ -210,29 +210,68 @@ async def read_optimization(
         page: Page number (default: 1)
         page_size: Results per page (default: 20, max: 50)
     """
+    # QC statistics array indices (from their docs):
+    # [0]=alpha, [1]=annual std dev, [2]=annual variance, [3]=avg loss%, [4]=avg win%,
+    # [5]=beta, [6]=cagr%, [7]=drawdown%, [8]=estimated capacity, [9]=expectancy,
+    # [10]=info ratio, [11]=loss rate%, [12]=net profit%, [13]=probabilistic sharpe,
+    # [14]=profit-loss ratio, [15]=sharpe ratio, [16]=total fees, [17]=total orders,
+    # [18]=tracking error, [19]=treynor ratio, [20]=win rate%
+    STAT_INDICES = {
+        "alpha": 0,
+        "annual_std_dev": 1,
+        "cagr": 6,
+        "drawdown": 7,
+        "net_profit": 12,
+        "sharpe_ratio": 15,
+        "total_trades": 17,
+        "win_rate": 20,
+    }
+    
+    def get_stat(stats_array, key):
+        """Extract a statistic from the QC stats array."""
+        if not stats_array or not isinstance(stats_array, list):
+            return None
+        idx = STAT_INDICES.get(key)
+        if idx is None or idx >= len(stats_array):
+            return None
+        return stats_array[idx]
+    
     try:
         qc_project_id = runtime.context.get("qc_project_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
+        # QC API only needs optimizationId for read (not projectId)
         result = await qc_request(
             "/optimizations/read",
-            {"projectId": qc_project_id, "optimizationId": optimization_id},
+            {"optimizationId": optimization_id},
         )
 
         opt = result.get("optimization", {})
         if isinstance(opt, str):
              return json.dumps({"error": True, "message": f"Unexpected API response: optimization field is a string ({opt}). Check ID."})
 
-        all_backtests = opt.get("backtests", [])
+        # backtests can be dict (keyed by id) or list - normalize to list
+        backtests_raw = opt.get("backtests", {})
+        if isinstance(backtests_raw, dict):
+            all_backtests = list(backtests_raw.values())
+        elif isinstance(backtests_raw, list):
+            all_backtests = backtests_raw
+        else:
+            all_backtests = []
 
-        # Sort by target metric (Sharpe by default)
-        sorted_bt = sorted(
-            all_backtests,
-            key=lambda x: float(x.get("statistics", {}).get("Sharpe Ratio", 0) or 0),
-            reverse=True,
-        )
+        # Sort by Sharpe ratio (index 15 in stats array)
+        def get_sharpe(bt):
+            stats = bt.get("statistics", [])
+            if isinstance(stats, list) and len(stats) > 15:
+                return float(stats[15] or 0)
+            # Fallback: maybe it's a dict (older format)
+            if isinstance(stats, dict):
+                return float(stats.get("Sharpe Ratio", 0) or 0)
+            return 0
+        
+        sorted_bt = sorted(all_backtests, key=get_sharpe, reverse=True)
 
         total = len(sorted_bt)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -243,10 +282,23 @@ async def read_optimization(
         # Format results
         results = []
         for i, bt in enumerate(page_results):
-            stats = bt.get("statistics", {})
-            params = bt.get("parameters", {})
-            results.append(
-                {
+            stats = bt.get("statistics", [])
+            params = bt.get("parameterSet", bt.get("parameters", {}))
+            
+            # Handle both array and dict stats format
+            if isinstance(stats, list):
+                results.append({
+                    "rank": start + i + 1,
+                    "parameters": params,
+                    "net_profit": f"{get_stat(stats, 'net_profit'):.2f}%" if get_stat(stats, 'net_profit') else None,
+                    "cagr": f"{get_stat(stats, 'cagr'):.2f}%" if get_stat(stats, 'cagr') else None,
+                    "sharpe_ratio": f"{get_stat(stats, 'sharpe_ratio'):.3f}" if get_stat(stats, 'sharpe_ratio') else None,
+                    "max_drawdown": f"{get_stat(stats, 'drawdown'):.2f}%" if get_stat(stats, 'drawdown') else None,
+                    "win_rate": f"{get_stat(stats, 'win_rate'):.2f}%" if get_stat(stats, 'win_rate') else None,
+                })
+            else:
+                # Dict format (legacy)
+                results.append({
                     "rank": start + i + 1,
                     "parameters": params,
                     "net_profit": stats.get("Net Profit"),
@@ -254,27 +306,39 @@ async def read_optimization(
                     "sharpe_ratio": stats.get("Sharpe Ratio"),
                     "max_drawdown": stats.get("Drawdown"),
                     "win_rate": stats.get("Win Rate"),
-                }
-            )
+                })
 
         # Best result
         best = None
         if sorted_bt:
             best_bt = sorted_bt[0]
-            best_stats = best_bt.get("statistics", {})
-            best = {
-                "parameters": best_bt.get("parameters", {}),
-                "net_profit": best_stats.get("Net Profit"),
-                "cagr": best_stats.get("Compounding Annual Return"),
-                "sharpe_ratio": best_stats.get("Sharpe Ratio"),
-            }
+            best_stats = best_bt.get("statistics", [])
+            best_params = best_bt.get("parameterSet", best_bt.get("parameters", {}))
+            
+            if isinstance(best_stats, list):
+                best = {
+                    "parameters": best_params,
+                    "net_profit": f"{get_stat(best_stats, 'net_profit'):.2f}%" if get_stat(best_stats, 'net_profit') else None,
+                    "cagr": f"{get_stat(best_stats, 'cagr'):.2f}%" if get_stat(best_stats, 'cagr') else None,
+                    "sharpe_ratio": f"{get_stat(best_stats, 'sharpe_ratio'):.3f}" if get_stat(best_stats, 'sharpe_ratio') else None,
+                }
+            else:
+                best = {
+                    "parameters": best_params,
+                    "net_profit": best_stats.get("Net Profit"),
+                    "cagr": best_stats.get("Compounding Annual Return"),
+                    "sharpe_ratio": best_stats.get("Sharpe Ratio"),
+                }
+
+        # Runtime stats from QC
+        runtime_stats = opt.get("runtimeStatistics", {})
 
         # Build UI-friendly data structure
         ui_data = {
             "optimizationId": optimization_id,
             "name": opt.get("name", "Unknown"),
             "status": opt.get("status", "Unknown"),
-            "progress": opt.get("progress", 0),
+            "progress": runtime_stats.get("Completed", "0") + "/" + runtime_stats.get("Total", "0"),
             "bestResult": best,
             "pagination": {
                 "currentPage": page,
@@ -294,7 +358,9 @@ async def read_optimization(
                 "optimization_id": optimization_id,
                 "name": opt.get("name", "Unknown"),
                 "status": opt.get("status", "Unknown"),
-                "progress": f"{(opt.get('progress', 0) * 100):.1f}%",
+                "completed": runtime_stats.get("Completed", "0"),
+                "total": runtime_stats.get("Total", "0"),
+                "failed": runtime_stats.get("Failed", "0"),
                 "best_result": best,
                 "pagination": {
                     "current_page": page,
