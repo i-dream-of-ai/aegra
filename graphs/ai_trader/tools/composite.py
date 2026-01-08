@@ -228,11 +228,11 @@ async def qc_compile_and_backtest(
 
 @tool
 async def qc_compile_and_optimize(
-    tool_runtime: ToolRuntime[Context],
     optimization_name: str,
     target: str,
     target_to: str,
     parameters: list[dict],
+    runtime: ToolRuntime[Context],
     constraints: list[dict] = None,
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
@@ -250,7 +250,7 @@ async def qc_compile_and_optimize(
         parallel_nodes: Number of parallel nodes (default: 4)
     """
     try:
-        qc_project_id = tool_runtime.context.get("qc_project_id")
+        qc_project_id = runtime.context.get("qc_project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
