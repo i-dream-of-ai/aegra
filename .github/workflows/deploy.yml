@@ -17,9 +17,20 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
             cd /opt/aegra-core
+
+            # Preserve .env file during git clean
             git fetch origin main
             git reset --hard origin/main
-            git clean -fd
+            git clean -fd -e .env
+
+            # Rebuild and restart the container
             docker compose build --no-cache aegra
             docker compose up -d aegra
+
+            # Verify container is running
+            sleep 5
+            docker compose ps aegra
+
+            # Show recent logs
+            docker compose logs aegra --tail=20
 
