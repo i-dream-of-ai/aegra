@@ -67,7 +67,25 @@ async def review_node(state: State, *, runtime: Runtime[Context]) -> dict:
         model = ChatOpenAI(**model_kwargs)
 
     # Build messages - reviewer sees the full conversation history
-    messages = [SystemMessage(content=reviewer_prompt)] + list(state.messages)
+    # Sanitize message names for OpenAI compatibility (OpenAI rejects spaces and certain chars)
+    def sanitize_name(name: str) -> str:
+        if not name:
+            return name
+        # Replace spaces and invalid chars: \s, <, |, \, /, >
+        import re
+        return re.sub(r'[\s<|\\/>]', '_', name)
+    
+    sanitized_messages = []
+    for msg in state.messages:
+        if hasattr(msg, 'name') and msg.name:
+            # Create a copy with sanitized name
+            msg_copy = msg.model_copy()
+            msg_copy.name = sanitize_name(msg.name)
+            sanitized_messages.append(msg_copy)
+        else:
+            sanitized_messages.append(msg)
+    
+    messages = [SystemMessage(content=reviewer_prompt)] + sanitized_messages
 
     # Invoke the model
     response = await model.ainvoke(messages)
