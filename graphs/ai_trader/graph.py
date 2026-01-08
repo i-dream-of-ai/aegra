@@ -341,7 +341,8 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
 # =============================================================================
 
 # Default model from environment
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
+DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
+DEFAULT_MODEL = init_chat_model(model=DEFAULT_MODEL_NAME)
 
 # Configure the reviewer as a subagent
 REVIEWER_SUBAGENT = CompiledSubAgent(
