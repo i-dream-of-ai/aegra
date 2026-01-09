@@ -5,11 +5,11 @@ This node runs before the main agent loop to:
 1. Analyze the user's intent
 2. Retrieve relevant skills from the knowledge base
 3. Synthesize context to inject into the system prompt
-4. Stream progress events to the frontend
+4. Stream progress events to the frontend via push_ui_message
 
 Unlike the middleware approach, this node:
 - Runs exactly ONCE per graph invocation (not on every model call)
-- Streams events in real-time via custom stream mode
+- Streams UI messages in real-time via push_ui_message (generative UI)
 - Persists results in graph state for the agent to use
 """
 
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.types import StreamWriter
+from langgraph.graph.ui import push_ui_message
 
 from graphs.ai_trader.subconscious.middleware import SubconsciousMiddleware as SubconsciousProcessor
 from graphs.ai_trader.subconscious.types import SubconsciousEvent, is_confirmation_message
@@ -32,22 +32,20 @@ logger = structlog.getLogger(__name__)
 async def subconscious_node(
     state: "AITraderState",
     *,
-    writer: StreamWriter,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Subconscious processing node - runs ONCE at graph start.
 
     Analyzes conversation, retrieves skills, and synthesizes context.
-    Streams progress events to frontend via custom stream mode.
+    Streams UI messages to frontend via push_ui_message (generative UI).
 
     Args:
         state: Current graph state with messages
-        writer: Stream writer for emitting custom events
         context: Runtime context with access_token, etc.
 
     Returns:
-        State update with subconscious_context for the agent
+        State update with subconscious_context for the agent and ui messages
     """
     ctx = context or {}
     messages = state.get("messages", [])
@@ -79,14 +77,15 @@ async def subconscious_node(
     start_time = time.time()
 
     def emit_event(event: SubconsciousEvent):
-        """Emit event to stream for frontend consumption."""
+        """Emit UI message to stream for frontend consumption via push_ui_message."""
         if event.type == "instinct_injection":
-            # Final injection event with all skill data
+            # Final injection event with all skill data - stage="done"
             data = event.data or {}
             duration_ms = int((time.time() - start_time) * 1000)
-            writer({
-                "type": "instinct_injection",
-                "data": {
+            push_ui_message(
+                "subconscious-panel",
+                {
+                    "stage": "done",
                     "userIntent": data.get("userIntent"),
                     "skills": data.get("skills", []),
                     "content": data.get("content"),
@@ -95,13 +94,13 @@ async def subconscious_node(
                     "durationMs": duration_ms,
                     "skillIds": data.get("skillIds", []),
                 },
-            })
+            )
         else:
-            # Progress events (planning, retrieving, synthesizing, done)
-            writer({
-                "type": "subconscious_thinking",
-                "stage": event.stage,
-            })
+            # Progress events (planning, retrieving, synthesizing)
+            push_ui_message(
+                "subconscious-panel",
+                {"stage": event.stage},
+            )
 
     try:
         processor = SubconsciousProcessor(on_event=emit_event)
@@ -129,7 +128,7 @@ async def subconscious_node(
     except Exception as e:
         logger.warning("Subconscious processing failed", error=str(e), exc_info=True)
         # Emit done event even on error so UI doesn't get stuck
-        writer({"type": "subconscious_thinking", "stage": "done"})
+        push_ui_message("subconscious-panel", {"stage": "done"})
         return {}
 
 
