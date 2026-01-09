@@ -1,36 +1,30 @@
 """
-AI Trader Agent - Using create_agent with Latest Middleware Patterns
+AI Trader Agent - StateGraph with Subconscious Pre-processing
 
-Uses the LangChain create_agent API per official docs:
-https://docs.langchain.com/oss/python/langchain/agents
-https://docs.langchain.com/oss/python/langchain/middleware/built-in
-https://docs.langchain.com/oss/python/langchain/middleware/custom
+Architecture:
+    START -> subconscious -> agent -> END
 
-Middleware patterns:
-- @dynamic_prompt: Dynamic system prompt with subconscious injection
-- @wrap_model_call: Dynamic model selection from context
-- SummarizationMiddleware: Built-in context window management
-- Generative UI via push_ui_message for custom components
+1. Subconscious Node: Runs ONCE at graph start to analyze intent and inject skills
+   - Streams progress events via custom stream mode (planning, retrieving, synthesizing)
+   - Emits instinct_injection event with selected skills
+   - Updates state with subconscious_context for the agent's system prompt
+
+2. Agent Node: The main create_agent loop with all tools and middleware
+   - Uses @dynamic_prompt to inject subconscious context into system prompt
+   - Uses @wrap_model_call for dynamic model selection
+   - Generative UI via push_ui_message for custom components
 """
 
-# from __future__ import annotations
-
-import contextlib
 import os
-import time
-import uuid
 from datetime import UTC, datetime
 import typing
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import Any, Callable, Sequence
 
 import structlog
 from langchain.agents import create_agent
 from deepagents import CompiledSubAgent
 from deepagents.middleware.subagents import SubAgentMiddleware
 from langchain.agents.middleware import (
-    SummarizationMiddleware,
-    ContextEditingMiddleware,
-    ClearToolUsesEdit,
     dynamic_prompt,
     wrap_model_call,
     before_model,
@@ -40,19 +34,13 @@ from langchain.agents.middleware import (
     AgentMiddleware,
 )
 from langchain_openai import ChatOpenAI
-from langchain.messages import SystemMessage
 from langchain_core.messages import ToolMessage
-from langgraph.graph.ui import AnyUIMessage, push_ui_message, ui_message_reducer
-from langgraph.runtime import Runtime
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 
 from graphs.ai_trader.context import Context
 from graphs.ai_trader.prompts import DEFAULT_MAIN_PROMPT
-from graphs.ai_trader.subconscious.middleware import (
-    SubconsciousMiddleware as SubconsciousProcessor,
-)
-
-if TYPE_CHECKING:
-    from graphs.ai_trader.subconscious.types import SubconsciousEvent
+from graphs.ai_trader.nodes.subconscious import subconscious_node
 
 # Import all tools
 from graphs.ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
@@ -124,14 +112,13 @@ async def dynamic_model_selection(
 ) -> ModelResponse:
     """Select model dynamically based on runtime context."""
     from langchain_anthropic import ChatAnthropic
-    
+
     ctx = request.runtime.context or {}
     model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", "gpt-5.2"))
-    
+
     # Initialize model based on name - use explicit class to ensure proper type detection
     is_claude = model_name.startswith("claude")
-    is_openai = model_name.startswith("gpt") or model_name.startswith("o1") or model_name.startswith("o3") or model_name.startswith("ft:")
-    
+
     if is_claude:
         model = ChatAnthropic(model=model_name)
         thinking_budget = ctx.get("thinking_budget") or 0
@@ -145,7 +132,7 @@ async def dynamic_model_selection(
         reasoning_effort = ctx.get("reasoning_effort")
         if reasoning_effort and reasoning_effort != "none":
             model = model.bind(reasoning_effort=reasoning_effort)
-        
+
         # OpenAI has strict validation on message names - sanitize them
         # Pattern: ^[^\s<|\\/\>]+$ (no whitespace, <, |, \, /, >)
         import re
@@ -153,7 +140,7 @@ async def dynamic_model_selection(
             if not name:
                 return name
             return re.sub(r'[\s<|\\/\>]', '_', name)
-        
+
         # Sanitize message names in the request
         sanitized_messages = []
         for msg in request.messages:
@@ -163,10 +150,10 @@ async def dynamic_model_selection(
                 sanitized_messages.append(msg_copy)
             else:
                 sanitized_messages.append(msg)
-        
+
         # Override request with sanitized messages
         request = request.override(messages=sanitized_messages)
-    
+
     logger.info("Dynamic model selection", model=model_name, model_type=type(model).__name__)
     return await handler(request.override(model=model))
 
@@ -178,7 +165,12 @@ async def dynamic_model_selection(
 
 @dynamic_prompt
 def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
-    """Build system prompt with timestamp and subconscious context."""
+    """Build system prompt with timestamp and subconscious context.
+
+    The subconscious_context comes from the subconscious node that ran before
+    the agent. It's stored in state by the subconscious node, and we also
+    check runtime context for backwards compatibility.
+    """
     # Defensive logic: Check if first arg is ModelRequest (has runtime) or State (dict)
     ctx = {}
     if args:
@@ -203,7 +195,7 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
 
     # Get base prompt
     base_prompt = ctx.get("system_prompt") or DEFAULT_MAIN_PROMPT
-    
+
     logger.info(
         "System prompt source",
         has_ctx=bool(ctx),
@@ -211,110 +203,20 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
         using_default=not bool(ctx.get("system_prompt")),
         prompt_preview=base_prompt[:100] if base_prompt else "NONE",
     )
-    
+
     # Format with timestamp
     prompt = base_prompt.format(system_time=datetime.now(tz=UTC).isoformat())
-    
-    # Add subconscious context if available
-    subconscious = ctx.get("subconscious_context")
+
+    # Get subconscious context - first from state (set by subconscious node),
+    # then fall back to runtime context for backwards compatibility
+    subconscious = state.get("subconscious_context") if isinstance(state, dict) else None
+    if not subconscious:
+        subconscious = ctx.get("subconscious_context")
+
     if subconscious:
         prompt += f"\n\n<injected_context>\n{subconscious}\n</injected_context>"
-    
+
     return prompt
-
-
-# =============================================================================
-# Middleware: Subconscious Injection (before model)
-# =============================================================================
-
-
-@before_model
-async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
-    """Inject subconscious context before model call using Generative UI."""
-    from langgraph.graph.ui import UIMessage
-
-    # Generate unique ID for this subconscious run
-    subconscious_run_id = str(uuid.uuid4())[:8]
-
-    ctx = runtime.context or {}
-    
-    logger.info("inject_subconscious called", context_keys=list(ctx.keys()) if ctx else [])
-    
-    if not ctx.get("subconscious_enabled", True):
-        logger.info("Subconscious disabled via context flag")
-        return None
-    
-    access_token = ctx.get("access_token")
-    if not access_token:
-        logger.warning("Subconscious skipped: no access_token in context")
-        return None
-    
-    logger.info("Subconscious processing starting", has_token=bool(access_token))
-    
-    # Collect UI messages to return
-    ui_messages: list[UIMessage] = []
-    
-    try:
-        start_time = time.time()
-
-        def emit_event(event: "SubconsciousEvent"):
-            """Collect UI messages for state update."""
-            nonlocal ui_messages
-            if event.type == "instinct_injection":
-                data = event.data or {}
-                duration_ms = int((time.time() - start_time) * 1000)
-                # Create UI message for subconscious panel
-                ui_messages.append(UIMessage(
-                    id=f"subconscious-{subconscious_run_id}-done",
-                    name="subconscious-panel",
-                    props={
-                        "stage": "done",
-                        "userIntent": data.get("userIntent"),
-                        "skills": data.get("skills", []),
-                        "content": data.get("content"),
-                        "tokenCount": data.get("tokenCount", 0),
-                        "synthesisMethod": data.get("synthesisMethod", "unknown"),
-                        "durationMs": duration_ms,
-                        "skillIds": data.get("skillIds", []),
-                        "instinctSkills": data.get("instinctSkills", []),
-                        "contextualSkills": data.get("contextualSkills", []),
-                    },
-                ))
-            else:
-                # Progress events - each stage gets a unique ID
-                ui_messages.append(UIMessage(
-                    id=f"subconscious-{subconscious_run_id}-{event.stage}",
-                    name="subconscious-panel",
-                    props={"stage": event.stage},
-                ))
-
-        processor = SubconsciousProcessor(on_event=emit_event)
-
-        # Run async subconscious processing
-        subconscious = await processor.process(
-            messages=list(state["messages"]),
-            access_token=access_token,
-            current_turn=0,
-        )
-        
-        logger.info("Subconscious processing complete", 
-                   has_result=bool(subconscious),
-                   result_length=len(subconscious) if subconscious else 0)
-        
-        # Return state updates including both subconscious_context and ui messages
-        result = {}
-        if subconscious:
-            result["subconscious_context"] = subconscious
-        if ui_messages:
-            result["ui"] = ui_messages
-        
-        return result if result else None
-            
-    except Exception as e:
-        logger.warning("Subconscious injection failed", error=str(e), exc_info=True)
-    
-    return None
-
 
 
 # =============================================================================
@@ -323,7 +225,7 @@ async def inject_subconscious(state: AITraderState, runtime: Runtime) -> dict[st
 
 
 @before_model
-def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[str, Any] | None:
+def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str, Any] | None:
     """Patch any dangling tool calls before model invocation."""
     messages = list(state["messages"])
     if not messages:
@@ -335,7 +237,6 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
         for m in messages
         if getattr(m, "type", None) == "tool" and getattr(m, "tool_call_id", None)
     }
-    used_results = set()
 
     i = 0
     while i < len(messages):
@@ -355,7 +256,6 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
 
                 if tool_call_id in tool_results:
                     patched.append(tool_results[tool_call_id])
-                    used_results.add(tool_call_id)
                 else:
                     tool_name = tc.get("name", "unknown")
                     logger.warning("Patching dangling tool call", tool_call_id=tool_call_id)
@@ -375,7 +275,7 @@ def patch_dangling_tool_calls(state: AITraderState, runtime: Runtime) -> dict[st
 
 
 # =============================================================================
-# Create Agent with Middleware and Subagents
+# Create Agent (inner loop) with Middleware and Subagents
 # =============================================================================
 
 # Default model from environment
@@ -400,8 +300,8 @@ He operates in isolated context and returns a focused review.""",
     runnable=reviewer_graph,
 )
 
-# Create agent with all middleware and subagent support
-graph = create_agent(
+# Create the inner agent (without subconscious middleware - that's now a node)
+_inner_agent = create_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     middleware=[
@@ -416,10 +316,42 @@ graph = create_agent(
         ),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
-        # Custom: Dynamic system prompt with subconscious
+        # Custom: Dynamic system prompt with subconscious context from state
         build_system_prompt,
-        # Custom: Subconscious injection
-        inject_subconscious,
+        # Custom: Patch dangling tool calls
+        patch_dangling_tool_calls,
     ],
-    name="AI_Trader",
+    name="agent",
 )
+
+
+# =============================================================================
+# Wrapper Graph: Subconscious -> Agent
+# =============================================================================
+
+
+async def agent_node(state: AITraderState, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Wrapper node that invokes the inner agent.
+
+    This node simply delegates to the inner agent created by create_agent.
+    The agent handles all tool calls, model invocations, and response generation.
+    """
+    # Invoke the inner agent - it handles its own loop
+    result = await _inner_agent.ainvoke(state, context=context)
+    return result
+
+
+# Build the wrapper graph: START -> subconscious -> agent -> END
+_builder = StateGraph(AITraderState)
+
+# Add nodes
+_builder.add_node("subconscious", subconscious_node)
+_builder.add_node("agent", agent_node)
+
+# Add edges
+_builder.add_edge(START, "subconscious")
+_builder.add_edge("subconscious", "agent")
+_builder.add_edge("agent", END)
+
+# Compile the graph
+graph = _builder.compile()
