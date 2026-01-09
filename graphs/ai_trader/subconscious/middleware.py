@@ -20,18 +20,20 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+import structlog
+
+from .deduplication import deduplicate_by_content
+from .outcome_tracker import record_skill_injection
 from .planner import generate_retrieval_plan
-from .retriever import (
-    retrieve_always_skills,
-    retrieve_skills_by_embedding,
-    retrieve_skills_by_keywords,
-)
+from .retriever import retrieve_all_skills_parallel
 from .synthesizer import synthesize_context
 from .types import (
     SubconsciousEvent,
     SubconsciousState,
     is_confirmation_message,
 )
+
+logger = structlog.getLogger(__name__)
 
 # Minimum turns between injections to avoid spamming
 MIN_TURNS_BETWEEN_INJECTION = 2
@@ -62,13 +64,14 @@ class SubconsciousMiddleware:
             try:
                 self.on_event(event)
             except Exception as e:
-                print(f"[Subconscious] Error emitting event: {e}")
+                logger.warning("Error emitting subconscious event", error=str(e))
 
     async def process(
         self,
         messages: list[BaseMessage],
         access_token: str,
         current_turn: int = 0,
+        thread_id: str | None = None,
     ) -> str | None:
         """
         Process messages and return context to inject.
@@ -77,6 +80,7 @@ class SubconsciousMiddleware:
             messages: Conversation messages
             access_token: Supabase access token for DB queries
             current_turn: Current conversation turn number
+            thread_id: Thread ID for outcome tracking
 
         Returns:
             Context string to inject, or None if no injection needed
@@ -92,7 +96,7 @@ class SubconsciousMiddleware:
 
         # Fast path: Confirmation messages skip planning
         if is_confirmation_message(last_human):
-            print("[Subconscious] Confirmation message detected, skipping")
+            logger.debug("Confirmation message detected, skipping subconscious")
             return None
 
         try:
@@ -112,43 +116,20 @@ class SubconsciousMiddleware:
                 self.emit(SubconsciousEvent(type="subconscious_thinking", stage="done"))
                 return None
 
-            # PHASE 2: Retrieval
+            # PHASE 2: Retrieval (parallel for performance)
             self.emit(
                 SubconsciousEvent(type="subconscious_thinking", stage="retrieving")
             )
 
-            skills = []
+            # Retrieve all skills in parallel (always + keyword + semantic)
+            skills = await retrieve_all_skills_parallel(
+                keywords=plan.keyword_queries or [],
+                semantic_queries=plan.semantic_queries or [],
+                access_token=access_token,
+            )
 
-            # Get always-inject skills
-            always_skills = await retrieve_always_skills(access_token)
-            skills.extend(always_skills)
-
-            # Keyword search
-            if plan.keyword_queries:
-                keyword_skills = await retrieve_skills_by_keywords(
-                    keywords=plan.keyword_queries,
-                    access_token=access_token,
-                    limit=5,
-                )
-                skills.extend(keyword_skills)
-
-            # Semantic search
-            if plan.semantic_queries:
-                for query in plan.semantic_queries[:2]:
-                    semantic_skills = await retrieve_skills_by_embedding(
-                        query=query,
-                        access_token=access_token,
-                        limit=3,
-                    )
-                    skills.extend(semantic_skills)
-
-            # Deduplicate by ID
-            seen_ids = set()
-            unique_skills = []
-            for skill in skills:
-                if skill.id not in seen_ids:
-                    seen_ids.add(skill.id)
-                    unique_skills.append(skill)
+            # Deduplicate by content (catches semantically similar skills)
+            unique_skills = deduplicate_by_content(skills)
 
             if not unique_skills:
                 self.emit(SubconsciousEvent(type="subconscious_thinking", stage="done"))
@@ -170,6 +151,19 @@ class SubconsciousMiddleware:
             self.state.last_injection_turn = current_turn
             self.state.injection_count += 1
 
+            # Record injection for outcome tracking (non-blocking)
+            injection_id = None
+            if thread_id and result.skill_ids:
+                try:
+                    injection_id = await record_skill_injection(
+                        skill_ids=result.skill_ids,
+                        thread_id=thread_id,
+                        user_intent=plan.user_intent,
+                        synthesis_method=result.synthesis_method,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to record skill injection", error=str(e))
+
             # Build skill info for UI
             skill_info = [
                 {"id": s.id, "name": s.name, "tags": s.tags}
@@ -189,6 +183,7 @@ class SubconsciousMiddleware:
                         "tokenCount": result.token_count,
                         "driftScore": result.drift_score,
                         "synthesisMethod": result.synthesis_method,
+                        "injectionId": injection_id,  # For later outcome recording
                     },
                 )
             )
@@ -198,7 +193,7 @@ class SubconsciousMiddleware:
             return result.content if result.content else None
 
         except Exception as e:
-            print(f"[Subconscious] Error in processing: {e}")
+            logger.error("Error in subconscious processing", error=str(e), exc_info=True)
             self.emit(SubconsciousEvent(type="subconscious_thinking", stage="done"))
             return None
 

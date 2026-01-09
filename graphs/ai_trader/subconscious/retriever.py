@@ -6,12 +6,16 @@ Retrieves relevant skills from the database using:
 - pgvector for semantic similarity
 """
 
+import asyncio
 import os
 
 import httpx
+import structlog
 from openai import AsyncOpenAI
 
 from .types import RetrievedSkill
+
+logger = structlog.getLogger(__name__)
 
 # OpenAI client for embeddings
 _openai_client: AsyncOpenAI | None = None
@@ -112,8 +116,19 @@ async def retrieve_skills_by_keywords(
                     )
                     for skill in data
                 ]
+            else:
+                logger.warning(
+                    "Keyword retrieval failed",
+                    status_code=response.status_code,
+                    keywords=keywords,
+                )
     except Exception as e:
-        print(f"[Retriever] Error retrieving skills by keywords: {e}")
+        logger.error(
+            "Error retrieving skills by keywords",
+            keywords=keywords,
+            error=str(e),
+            exc_info=True,
+        )
 
     return []
 
@@ -173,11 +188,48 @@ async def retrieve_skills_by_embedding(
                     for skill in data
                 ]
             else:
-                print(f"[Retriever] Embedding search failed: {response.status_code}")
+                logger.warning(
+                    "Embedding search failed",
+                    status_code=response.status_code,
+                    query=query[:100],
+                )
     except Exception as e:
-        print(f"[Retriever] Error retrieving skills by embedding: {e}")
+        logger.error(
+            "Error retrieving skills by embedding",
+            query=query[:100],
+            error=str(e),
+            exc_info=True,
+        )
 
     return []
+
+
+async def retrieve_skills_by_embeddings_batch(
+    queries: list[str],
+    access_token: str,
+    limit_per_query: int = 3,
+    min_similarity: float = 0.3,
+) -> list[RetrievedSkill]:
+    """
+    Retrieve skills by semantic similarity for multiple queries in parallel.
+    """
+    if not queries:
+        return []
+
+    tasks = [
+        retrieve_skills_by_embedding(q, access_token, limit_per_query, min_similarity)
+        for q in queries[:3]  # Max 3 queries
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    skills = []
+    for result in results:
+        if isinstance(result, list):
+            skills.extend(result)
+        elif isinstance(result, Exception):
+            logger.warning("Batch embedding query failed", error=str(result))
+
+    return skills
 
 
 async def retrieve_always_skills(
@@ -227,6 +279,45 @@ async def retrieve_always_skills(
                     for skill in data
                 ]
     except Exception as e:
-        print(f"[Retriever] Error retrieving always skills: {e}")
+        logger.error(
+            "Error retrieving always skills",
+            error=str(e),
+            exc_info=True,
+        )
 
     return []
+
+
+async def retrieve_all_skills_parallel(
+    keywords: list[str],
+    semantic_queries: list[str],
+    access_token: str,
+) -> list[RetrievedSkill]:
+    """
+    Retrieve all skills in parallel: always-inject + keywords + semantic.
+    This is faster than sequential retrieval.
+    """
+    # Run all retrievals in parallel
+    always_task = retrieve_always_skills(access_token)
+    keyword_task = retrieve_skills_by_keywords(keywords, access_token, limit=5) if keywords else asyncio.sleep(0)
+    semantic_task = retrieve_skills_by_embeddings_batch(semantic_queries, access_token, limit_per_query=3)
+
+    results = await asyncio.gather(
+        always_task,
+        keyword_task,
+        semantic_task,
+        return_exceptions=True,
+    )
+
+    skills = []
+    for i, result in enumerate(results):
+        if isinstance(result, list):
+            skills.extend(result)
+        elif isinstance(result, Exception):
+            source = ["always", "keyword", "semantic"][i]
+            logger.warning(f"Parallel retrieval failed for {source}", error=str(result))
+        # asyncio.sleep returns None, skip it
+        elif result is None:
+            pass
+
+    return skills
