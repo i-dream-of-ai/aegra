@@ -158,7 +158,7 @@ async def _save_code_version(
             "sharpe_ratio": _parse_decimal(stats.get("Sharpe Ratio")),
             "max_drawdown": _parse_percent(stats.get("Drawdown")),
             "win_rate": _parse_percent(stats.get("Win Rate")),
-            "total_trades": _parse_int(stats.get("Total Trades")),
+            "total_trades": _parse_int(stats.get("Total Orders")),
         }
 
         result = await client.insert("code_versions", record)
@@ -410,6 +410,15 @@ async def qc_update_and_run_backtest(
                 status="completed",
             )
 
+            # Parse total orders as integer
+            total_orders_raw = stats.get("Total Orders")
+            total_orders = None
+            if total_orders_raw is not None:
+                try:
+                    total_orders = int(float(str(total_orders_raw).replace(",", "")))
+                except (ValueError, TypeError):
+                    total_orders = None
+
             # Emit custom UI for backtest stats
             push_ui_message("backtest-stats", {
                 "backtestId": backtest_id,
@@ -418,10 +427,14 @@ async def qc_update_and_run_backtest(
                 "completed": True,
                 "summary": {
                     "totalReturn": stats.get("Net Profit"),
+                    "annualReturn": stats.get("Compounding Annual Return"),
                     "sharpeRatio": stats.get("Sharpe Ratio"),
                     "drawdown": stats.get("Drawdown"),
-                    "totalTrades": stats.get("Total Trades"),
+                    "totalTrades": total_orders,
                     "winRate": stats.get("Win Rate"),
+                    "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
+                    "averageWin": stats.get("Average Win"),
+                    "averageLoss": stats.get("Average Loss"),
                 },
             }, message={"id": runtime.tool_call_id})
 
@@ -436,9 +449,11 @@ async def qc_update_and_run_backtest(
                     else None,
                     "statistics": {
                         "net_profit": stats.get("Net Profit", "N/A"),
+                        "cagr": stats.get("Compounding Annual Return", "N/A"),
                         "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
                         "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "total_trades": stats.get("Total Trades", "N/A"),
+                        "total_orders": stats.get("Total Orders", "N/A"),
+                        "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
                     },
                 },
                 indent=2,
@@ -599,6 +614,15 @@ async def qc_edit_and_run_backtest(
                 status="completed",
             )
 
+            # Parse total orders as integer
+            total_orders_raw = stats.get("Total Orders")
+            total_orders = None
+            if total_orders_raw is not None:
+                try:
+                    total_orders = int(float(str(total_orders_raw).replace(",", "")))
+                except (ValueError, TypeError):
+                    total_orders = None
+
             # Emit custom UI component for backtest stats
             push_ui_message("backtest-stats", {
                 "backtestId": backtest_id,
@@ -607,10 +631,14 @@ async def qc_edit_and_run_backtest(
                 "completed": True,
                 "summary": {
                     "totalReturn": stats.get("Net Profit"),
+                    "annualReturn": stats.get("Compounding Annual Return"),
                     "sharpeRatio": stats.get("Sharpe Ratio"),
                     "drawdown": stats.get("Drawdown"),
-                    "totalTrades": stats.get("Total Trades"),
+                    "totalTrades": total_orders,
                     "winRate": stats.get("Win Rate"),
+                    "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
+                    "averageWin": stats.get("Average Win"),
+                    "averageLoss": stats.get("Average Loss"),
                 },
             }, message={"id": runtime.tool_call_id})
 
@@ -626,9 +654,11 @@ async def qc_edit_and_run_backtest(
                     else None,
                     "statistics": {
                         "net_profit": stats.get("Net Profit", "N/A"),
+                        "cagr": stats.get("Compounding Annual Return", "N/A"),
                         "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
                         "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "total_trades": stats.get("Total Trades", "N/A"),
+                        "total_orders": stats.get("Total Orders", "N/A"),
+                        "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
                     },
                 },
                 indent=2,
