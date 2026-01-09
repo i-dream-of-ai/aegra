@@ -145,7 +145,8 @@ async def read_backtest(
                 "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
                 "averageWin": stats.get("Average Win"),
                 "averageLoss": stats.get("Average Loss"),
-                # Note: Starting/ending equity not in statistics - would need equity chart data
+                "startingEquity": stats.get("Start Equity"),
+                "endingEquity": stats.get("End Equity"),
                 "probabilisticSharpeRatio": stats.get("Probabilistic Sharpe Ratio"),
                 "portfolioTurnover": stats.get("Portfolio Turnover"),
             },
