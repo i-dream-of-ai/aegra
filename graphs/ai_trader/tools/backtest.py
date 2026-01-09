@@ -116,7 +116,16 @@ async def read_backtest(
             backtest = backtest[0] if backtest else {}
 
         stats = backtest.get("statistics", {}) if isinstance(backtest, dict) else {}
-        
+
+        # Parse total orders as integer if present (QC API uses "Total Orders" not "Total Trades")
+        total_orders_raw = stats.get("Total Orders")
+        total_orders = None
+        if total_orders_raw is not None:
+            try:
+                total_orders = int(float(str(total_orders_raw).replace(",", "")))
+            except (ValueError, TypeError):
+                total_orders = total_orders_raw
+
         # Build UI-friendly data structure
         ui_data = {
             "backtestId": backtest_id,
@@ -124,19 +133,25 @@ async def read_backtest(
             "status": "Completed" if (isinstance(backtest, dict) and backtest.get("completed")) else "Running",
             "completed": backtest.get("completed", False) if isinstance(backtest, dict) else False,
             "error": backtest.get("error") if isinstance(backtest, dict) and backtest.get("error") else None,
+            "created": backtest.get("created") if isinstance(backtest, dict) else None,
             "summary": {
                 "totalReturn": stats.get("Net Profit"),
                 "annualReturn": stats.get("Compounding Annual Return"),
                 "sharpeRatio": stats.get("Sharpe Ratio"),
                 "drawdown": stats.get("Drawdown"),
+                "maxDrawdown": stats.get("Drawdown"),  # Alias for UI
                 "winRate": stats.get("Win Rate"),
-                "totalTrades": stats.get("Total Trades"),
+                "totalTrades": total_orders,  # QC uses "Total Orders"
                 "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
                 "averageWin": stats.get("Average Win"),
                 "averageLoss": stats.get("Average Loss"),
+                # Note: Starting/ending equity not in statistics - would need equity chart data
+                "probabilisticSharpeRatio": stats.get("Probabilistic Sharpe Ratio"),
+                "portfolioTurnover": stats.get("Portfolio Turnover"),
             },
+            "allStatistics": stats,  # Pass all stats for detailed view
         }
-        
+
         # Emit UI component via generative UI (linked to tool call message)
         push_ui_message("backtest-stats", ui_data, message={"id": runtime.tool_call_id})
 
@@ -153,7 +168,7 @@ async def read_backtest(
                     "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
                     "max_drawdown": stats.get("Drawdown", "N/A"),
                     "win_rate": stats.get("Win Rate", "N/A"),
-                    "total_trades": stats.get("Total Trades", "N/A"),
+                    "total_orders": stats.get("Total Orders", "N/A"),
                     "profit_factor": stats.get(
                         "Profit-Loss Ratio", stats.get("Expectancy", "N/A")
                     ),
