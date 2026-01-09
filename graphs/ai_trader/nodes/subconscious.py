@@ -59,18 +59,21 @@ async def subconscious_node(
     # Check if subconscious is enabled
     if not ctx.get("subconscious_enabled", True):
         logger.info("Subconscious disabled via context flag")
+        push_ui_message("subconscious-panel", {"stage": "done", "skipped": True, "reason": "disabled"})
         return {}
 
     # Get access token for DB queries
     access_token = ctx.get("access_token")
     if not access_token:
         logger.warning("Subconscious skipped: no access_token in context")
+        push_ui_message("subconscious-panel", {"stage": "done", "skipped": True, "reason": "no_auth"})
         return {}
 
     # Check for confirmation message (skip subconscious for "yes", "ok", etc.)
     last_human = _get_last_human_message(messages)
     if last_human and is_confirmation_message(last_human):
         logger.info("Confirmation message detected, skipping subconscious")
+        push_ui_message("subconscious-panel", {"stage": "done", "skipped": True, "reason": "confirmation"})
         return {}
 
     # Start processing with streaming events

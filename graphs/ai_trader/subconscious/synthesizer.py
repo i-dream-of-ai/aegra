@@ -6,11 +6,15 @@ for the main agent.
 """
 
 import json
+import re
 
+import structlog
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .types import InjectionResult, RetrievedSkill
+
+logger = structlog.getLogger(__name__)
 
 # Synthesizer system prompt
 SYNTHESIZER_PROMPT = """You are a context synthesizer that prepares actionable guidance for a trading algorithm developer.
@@ -74,7 +78,7 @@ async def synthesize_context(
     try:
         return await _llm_synthesis(skills, user_intent, conversation_context)
     except Exception as e:
-        print(f"[Synthesizer] LLM synthesis failed, using template: {e}")
+        logger.warning("LLM synthesis failed, using template fallback", error=str(e))
         return _template_synthesis(skills)
 
 
@@ -94,7 +98,7 @@ def _template_synthesis(skills: list[RetrievedSkill]) -> InjectionResult:
     return InjectionResult(
         content=content,
         skill_ids=[s.id for s in sorted_skills[:3]],
-        token_count=len(content) // 4,  # Rough estimate
+        token_count=estimate_token_count(content),
         drift_score=0.0,
         synthesis_method="template",
     )
@@ -161,18 +165,48 @@ Synthesize the most relevant skills into actionable context. Output JSON."""
             return InjectionResult(
                 content=final_content,
                 skill_ids=selected_ids,
-                token_count=len(final_content) // 4,
+                token_count=estimate_token_count(final_content),
                 drift_score=0.0,
                 synthesis_method="llm",
             )
 
     except Exception as e:
-        print(f"[Synthesizer] Error in LLM synthesis: {e}")
+        logger.error("Error in LLM synthesis", error=str(e), exc_info=True)
 
     # Fallback to template
     return _template_synthesis(skills)
 
 
 def estimate_token_count(text: str) -> int:
-    """Rough token estimate (~4 chars per token)."""
-    return len(text) // 4
+    """
+    Improved token estimation for Claude models.
+
+    Based on analysis:
+    - English prose: ~4 chars/token
+    - Code/markdown: ~3.2 chars/token
+    - JSON/structured: ~3 chars/token
+    - Whitespace-heavy: slightly more tokens
+
+    We use a weighted estimate based on content characteristics.
+    """
+    if not text:
+        return 0
+
+    # Count code indicators (markdown code blocks, brackets, etc.)
+    code_block_count = len(re.findall(r'```', text))
+    bracket_density = (text.count('{') + text.count('[') + text.count('(')) / max(len(text), 1)
+
+    # Determine content type ratio
+    is_code_heavy = code_block_count > 0 or bracket_density > 0.02
+
+    if is_code_heavy:
+        # Code/structured content: ~3.2 chars per token
+        base_estimate = len(text) / 3.2
+    else:
+        # Prose content: ~4 chars per token
+        base_estimate = len(text) / 4.0
+
+    # Add overhead for special tokens and formatting
+    overhead = len(text.split('\n')) * 0.5  # Newlines often become tokens
+
+    return int(base_estimate + overhead)
