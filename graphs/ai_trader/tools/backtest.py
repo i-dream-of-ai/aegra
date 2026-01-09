@@ -256,32 +256,49 @@ async def read_backtest_chart(
                     "series_type": series_info.get("seriesType", ""),
                 }
 
-        # Build UI data for chart component
+        # Build series summaries with first/last/min/max for display
+        series_summaries = {}
+        for series_name, series_info in series.items():
+            if isinstance(series_info, dict):
+                values = series_info.get("values", [])
+                if values:
+                    # values is array of [timestamp, value] pairs
+                    numeric_values = [v[1] for v in values if len(v) >= 2]
+                    series_summaries[series_name] = {
+                        "dataPoints": len(values),
+                        "first": numeric_values[0] if numeric_values else 0,
+                        "last": numeric_values[-1] if numeric_values else 0,
+                        "min": min(numeric_values) if numeric_values else 0,
+                        "max": max(numeric_values) if numeric_values else 0,
+                    }
+
+        # Build UI data matching ChartResultDisplay expected structure
         ui_data = {
-            "projectId": qc_project_id,
-            "backtestId": backtest_id,
-            "chartName": name,
-            "sampleCount": effective_count,
-            "seriesNames": series_names,
-            "seriesSummary": series_summary,
-            "series": series,
+            "chartInfo": {
+                "backtestId": backtest_id,
+                "chartName": name,
+                "seriesCount": len(series_names),
+                "seriesNames": series_names,
+                "sampleCount": effective_count,
+            },
+            "seriesSummaries": series_summaries,
+            "chart": {
+                "name": name,
+                "chartType": chart_data.get("chartType", 0),
+                "series": series,
+            },
         }
-        
+
         # Emit chart UI component via generative UI (linked to tool call message)
         push_ui_message("chart", ui_data, message={"id": runtime.tool_call_id})
 
         return json.dumps(
             {
-                "_chartRequest": True,
                 "success": True,
-                "project_id": qc_project_id,
-                "backtest_id": backtest_id,
                 "chart_name": name,
-                "sample_count": effective_count,
+                "series_count": len(series_names),
                 "series_names": series_names,
-                "series_summary": series_summary,
-                "series": series,  # Include full series data
-                "message": f'Chart "{name}" ready with {len(series_names)} series.',
+                "message": f'Chart "{name}" loaded with {len(series_names)} series. The chart is displayed above.',
             }
         )
 
