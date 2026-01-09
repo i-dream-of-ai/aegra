@@ -298,7 +298,8 @@ async def read_backtest_chart(
                 "chart_name": name,
                 "series_count": len(series_names),
                 "series_names": series_names,
-                "message": f'Chart "{name}" loaded with {len(series_names)} series. The chart is displayed above.',
+                "series_summaries": series_summaries,
+                "message": f'Chart "{name}" loaded. The chart is displayed to the user.',
             }
         )
 
