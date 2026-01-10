@@ -26,7 +26,7 @@ async def record_skill_injection(
     Record that skills were injected for a conversation turn.
     Returns an injection_id for later outcome tracking.
     """
-    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url or not skill_ids:
@@ -86,7 +86,7 @@ async def record_outcome(
     Returns:
         True if recorded successfully
     """
-    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url or not injection_id:
@@ -138,7 +138,7 @@ async def _update_skill_confidence(injection_id: str, outcome: str) -> None:
     - Failure: -0.03 confidence (min 0.1)
     - Partial: +0.005 confidence
     """
-    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url:
@@ -240,7 +240,7 @@ async def get_skill_effectiveness_stats(skill_id: str) -> dict[str, Any] | None:
     """
     Get effectiveness statistics for a skill.
     """
-    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
     if not supabase_url:
