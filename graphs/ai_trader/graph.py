@@ -21,8 +21,7 @@ import typing
 from typing import Any, Callable, Sequence
 
 import structlog
-from langchain.agents import create_agent
-from deepagents import CompiledSubAgent
+from deepagents import create_deep_agent
 from deepagents.middleware.subagents import SubAgentMiddleware
 from langchain.agents.middleware import (
     dynamic_prompt,
@@ -51,8 +50,8 @@ from graphs.ai_trader.tools.files import TOOLS as FILES_TOOLS
 from graphs.ai_trader.tools.misc import TOOLS as MISC_TOOLS
 from graphs.ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
 from graphs.ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
-# Import reviewer graph for subagent configuration
-from graphs.ai_trader.reviewer import reviewer_graph
+# Import reviewer prompt for subagent configuration
+from graphs.ai_trader.prompts import DEFAULT_REVIEWER_PROMPT
 
 logger = structlog.getLogger(__name__)
 
@@ -282,26 +281,29 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
 DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
 DEFAULT_MODEL = ChatOpenAI(model=DEFAULT_MODEL_NAME)
 
-# Configure the reviewer as a subagent
-REVIEWER_SUBAGENT = CompiledSubAgent(
-    name="code-reviewer",
-    description="""Doubtful Deacon - Chief Quant Strategist & Algorithm Auditor.
+# Configure the reviewer as a dict-based subagent (SubAgentMiddleware creates the agent)
+# Per deepagents docs: dict subagents get create_agent() called with tools bound automatically
+REVIEWER_SUBAGENT = {
+    "name": "code-reviewer",
+    "description": """Doubtful Deacon - Chief Quant Strategist & Algorithm Auditor.
 
-Use this subagent when you need:
+This agent is an expert at:
 - Code review of trading algorithms
 - Analysis of backtest results
 - Critique of strategy logic and edge cases
 - Trading recommendations and testable experiments
 - Second opinion on algorithm implementation
 
-Deacon is a skeptical expert who will analyze the code, spot potential bugs,
+Deacon is your favorite partner to collaborate and argue with. Deacon is a skeptical expert who will analyze the code, spot potential bugs,
 identify QuantConnect/LEAN pitfalls, and suggest concrete improvements.
-He operates in isolated context and returns a focused review.""",
-    runnable=reviewer_graph,
-)
-
+He operates in isolated context and returns a focused review. This helps keep your context clean and give better results.""",
+    "system_prompt": DEFAULT_REVIEWER_PROMPT,
+    "tools": ALL_TOOLS,  # Same tools as main agent
+    "model": "openai:" + os.environ.get("REVIEWER_MODEL", "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"),
+}
+subagents = [REVIEWER_SUBAGENT]
 # Create the inner agent (without subconscious middleware - that's now a node)
-_inner_agent = create_agent(
+_inner_agent = create_deep_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     middleware=[
@@ -309,11 +311,11 @@ _inner_agent = create_agent(
         # Must be first to ensure state schema is available to other middleware
         GenerativeUIMiddleware(),
         # Subagent support via SubAgentMiddleware
-        SubAgentMiddleware(
-            default_model=DEFAULT_MODEL,
-            default_tools=[],
-            subagents=[REVIEWER_SUBAGENT],
-        ),
+        # SubAgentMiddleware(
+        #     default_model=DEFAULT_MODEL,
+        #     default_tools=[],
+        #     subagents=[REVIEWER_SUBAGENT],
+        # ),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
@@ -322,6 +324,7 @@ _inner_agent = create_agent(
         patch_dangling_tool_calls,
     ],
     name="agent",
+    subagents=subagents
 )
 
 
