@@ -85,8 +85,8 @@ from .optimization import (
     update_optimization,
 )
 
-# Review (Doubtful Deacon)
-from .review import request_code_review
+# Review (Doubtful Deacon) - Now handled by SubAgentMiddleware's task() tool
+# The "code-reviewer" subagent is configured in graph.py
 
 __all__ = [
     # Files (5)
@@ -141,6 +141,5 @@ __all__ = [
     "read_project_nodes",
     "update_project_nodes",
     "read_lean_versions",
-    # Review (1)
-    "request_code_review",
+    # Review - handled by "code-reviewer" subagent via task() tool
 ]
