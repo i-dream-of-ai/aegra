@@ -274,6 +274,82 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
 
 
 # =============================================================================
+# Reviewer Middleware: Dynamic Model Selection
+# =============================================================================
+
+
+@wrap_model_call
+async def reviewer_dynamic_model_selection(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse],
+) -> ModelResponse:
+    """Select reviewer model dynamically based on runtime context."""
+    from langchain_anthropic import ChatAnthropic
+
+    ctx = request.runtime.context or {}
+    model_name = ctx.get("reviewer_model", os.environ.get("REVIEWER_MODEL", "gpt-4o-mini"))
+
+    is_claude = model_name.startswith("claude")
+
+    if is_claude:
+        model = ChatAnthropic(model=model_name)
+        thinking_budget = ctx.get("reviewer_thinking_budget") or 0
+        if thinking_budget > 0:
+            model = model.bind(
+                thinking={"type": "enabled", "budget_tokens": thinking_budget}
+            )
+    else:
+        model = ChatOpenAI(model=model_name)
+        reasoning_effort = ctx.get("reviewer_reasoning_effort")
+        if reasoning_effort and reasoning_effort != "none":
+            model = model.bind(reasoning_effort=reasoning_effort)
+
+        # Sanitize message names for OpenAI
+        import re
+        def sanitize_name(name: str) -> str:
+            if not name:
+                return name
+            return re.sub(r'[\s<|\\/\>]', '_', name)
+
+        sanitized_messages = []
+        for msg in request.messages:
+            if hasattr(msg, 'name') and msg.name:
+                msg_copy = msg.model_copy()
+                msg_copy.name = sanitize_name(msg.name)
+                sanitized_messages.append(msg_copy)
+            else:
+                sanitized_messages.append(msg)
+
+        request = request.override(messages=sanitized_messages)
+
+    logger.info("Reviewer dynamic model selection", model=model_name, model_type=type(model).__name__)
+    return await handler(request.override(model=model))
+
+
+# =============================================================================
+# Reviewer Middleware: Dynamic System Prompt
+# =============================================================================
+
+
+@dynamic_prompt
+def reviewer_build_system_prompt(state: dict, *args, **kwargs) -> str:
+    """Build reviewer system prompt from runtime context."""
+    ctx = {}
+    if args:
+        arg0 = args[0]
+        if hasattr(arg0, "runtime") and hasattr(arg0.runtime, "context"):
+            ctx = arg0.runtime.context or {}
+        elif hasattr(arg0, "get"):
+            ctx = arg0
+        elif hasattr(arg0, "context"):
+            ctx = arg0.context or {}
+
+    prompt = ctx.get("reviewer_prompt") or DEFAULT_REVIEWER_PROMPT
+    logger.info("Reviewer system prompt source", from_db=bool(ctx.get("reviewer_prompt")))
+    return prompt
+
+
+# =============================================================================
 # Create Agent (inner loop) with Middleware and Subagents
 # =============================================================================
 
@@ -285,8 +361,7 @@ DEFAULT_MODEL = ChatOpenAI(
     profile={"max_input_tokens": 118000}
 )
 
-# Configure the reviewer as a dict-based subagent (SubAgentMiddleware creates the agent)
-# Per deepagents docs: dict subagents get create_agent() called with tools bound automatically
+# Configure the reviewer as a dict-based subagent with dynamic middleware
 REVIEWER_SUBAGENT = {
     "name": "code-reviewer",
     "description": """Doubtful Deacon - Chief Quant Strategist & Algorithm Auditor.
@@ -301,9 +376,13 @@ This agent is an expert at:
 Deacon is your favorite partner to collaborate and argue with. Deacon is a skeptical expert who will analyze the code, spot potential bugs,
 identify QuantConnect/LEAN pitfalls, and suggest concrete improvements.
 He operates in isolated context and returns a focused review. This helps keep your context clean and give better results.""",
-    "system_prompt": DEFAULT_REVIEWER_PROMPT,
-    "tools": ALL_TOOLS,  # Same tools as main agent
-    "model": "openai:" + os.environ.get("REVIEWER_MODEL", "ft:gpt-4.1-mini-2025-04-14:chemular-inc:fin:CvDjVD7Q"),
+    "system_prompt": DEFAULT_REVIEWER_PROMPT,  # Fallback, overridden by middleware
+    "tools": ALL_TOOLS,
+    "model": "openai:" + os.environ.get("REVIEWER_MODEL", "gpt-5.2"),  # Fallback, overridden by middleware
+    "middleware": [
+        reviewer_dynamic_model_selection,
+        reviewer_build_system_prompt,
+    ],
 }
 subagents = [REVIEWER_SUBAGENT]
 # Create the inner agent (without subconscious middleware - that's now a node)
