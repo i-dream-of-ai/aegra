@@ -277,9 +277,13 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
 # Create Agent (inner loop) with Middleware and Subagents
 # =============================================================================
 
-# Default model from environment
+# Default model from environment with custom profile for 100k summarization trigger
+# create_deep_agent uses 85% of max_input_tokens as trigger, so 118k -> ~100k trigger
 DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
-DEFAULT_MODEL = ChatOpenAI(model=DEFAULT_MODEL_NAME)
+DEFAULT_MODEL = ChatOpenAI(
+    model=DEFAULT_MODEL_NAME,
+    profile={"max_input_tokens": 118000}
+)
 
 # Configure the reviewer as a dict-based subagent (SubAgentMiddleware creates the agent)
 # Per deepagents docs: dict subagents get create_agent() called with tools bound automatically
