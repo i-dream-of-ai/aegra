@@ -33,7 +33,7 @@ from langchain.agents.middleware import (
     AgentMiddleware,
 )
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 
@@ -225,13 +225,16 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
 
 @before_model
 def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str, Any] | None:
-    """Patch dangling tool calls AND filter orphan tool results before model invocation.
+    """Patch dangling tool calls AND remove orphan tool results before model invocation.
 
     Handles two cases:
     1. Dangling tool calls: AI message has tool_calls but no corresponding ToolMessage
        -> Add synthetic ToolMessage with "interrupted" content
     2. Orphan tool results: ToolMessage exists but no AI message has matching tool_call
-       -> Remove the orphan ToolMessage entirely
+       -> Use RemoveMessage to delete the orphan (add_messages reducer requires this)
+
+    Note: The messages field uses add_messages reducer which is append-only by default.
+    To actually remove messages, we must use RemoveMessage with the message's ID.
     """
     messages = list(state["messages"])
     if not messages:
@@ -246,53 +249,51 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
                 if tc_id:
                     valid_tool_call_ids.add(tc_id)
 
-    # Build dict of tool results (keyed by tool_call_id)
-    tool_results = {
-        m.tool_call_id: m
-        for m in messages
-        if getattr(m, "type", None) == "tool" and getattr(m, "tool_call_id", None)
-    }
+    # Find orphan tool results and dangling tool calls
+    updates = []
+    tool_result_ids_seen = set()
 
-    # Check for orphan tool results (results with no matching tool_call)
-    orphan_ids = set(tool_results.keys()) - valid_tool_call_ids
-    if orphan_ids:
-        logger.warning("Filtering orphan tool results", orphan_ids=list(orphan_ids))
+    for msg in messages:
+        msg_type = getattr(msg, "type", None)
 
-    patched = []
-    i = 0
-    while i < len(messages):
-        msg = messages[i]
+        if msg_type == "tool":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                tool_result_ids_seen.add(tool_call_id)
+                # Check if this is an orphan (no matching tool_call in any AI message)
+                if tool_call_id not in valid_tool_call_ids:
+                    msg_id = getattr(msg, "id", None)
+                    if msg_id:
+                        logger.warning("Removing orphan tool result", tool_call_id=tool_call_id, msg_id=msg_id)
+                        updates.append(RemoveMessage(id=msg_id))
+                    else:
+                        # If message has no ID, we can't remove it with RemoveMessage
+                        # Log and hope the model handles it (shouldn't happen normally)
+                        logger.error("Orphan tool result has no ID, cannot remove", tool_call_id=tool_call_id)
 
-        # Skip tool messages - they'll be added after their corresponding AI message
-        if getattr(msg, "type", None) == "tool":
-            i += 1
-            continue
-
-        patched.append(msg)
-
-        if getattr(msg, "tool_calls", None):
+        elif msg_type == "ai" and getattr(msg, "tool_calls", None):
+            # Check for dangling tool calls (tool_call with no result)
             for tc in msg.tool_calls:
-                tool_call_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                if not tool_call_id:
-                    continue
-
-                if tool_call_id in tool_results:
-                    patched.append(tool_results[tool_call_id])
-                else:
-                    tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
-                    logger.warning("Patching dangling tool call", tool_call_id=tool_call_id)
-                    patched.append(
-                        ToolMessage(
-                            content=f"Tool {tool_name} was interrupted/cancelled.",
-                            name=tool_name,
-                            tool_call_id=tool_call_id,
-                        )
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tc_id and tc_id not in tool_result_ids_seen:
+                    # Check if any later message has this result
+                    has_result = any(
+                        getattr(m, "type", None) == "tool" and getattr(m, "tool_call_id", None) == tc_id
+                        for m in messages
                     )
-        i += 1
+                    if not has_result:
+                        tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                        logger.warning("Patching dangling tool call", tool_call_id=tc_id)
+                        updates.append(
+                            ToolMessage(
+                                content=f"Tool {tc_name} was interrupted/cancelled.",
+                                name=tc_name,
+                                tool_call_id=tc_id,
+                            )
+                        )
 
-    # Return update if messages changed (different length or orphans removed)
-    if len(patched) != len(messages) or orphan_ids:
-        return {"messages": patched}
+    if updates:
+        return {"messages": updates}
     return None
 
 
