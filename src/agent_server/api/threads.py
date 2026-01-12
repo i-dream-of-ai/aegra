@@ -1015,28 +1015,51 @@ async def repair_thread(
                         )
                     )
 
-    # For orphan results, we need to remove them - but LangGraph doesn't support
-    # direct message removal easily. Log for now.
+    if not patches and not orphan_results:
+        return {"status": "ok", "patched": 0, "message": "No issues found"}
+
+    # If there are orphan results, filter them out from messages
     if orphan_results:
-        logger.warning(
-            "Found orphan tool results (no matching tool_use)",
+        logger.info(
+            "Removing orphan tool results",
             thread_id=thread_id,
             orphan_ids=list(orphan_results),
         )
+        # Filter out ToolMessages with orphan tool_call_ids
+        filtered_messages = [
+            msg for msg in messages
+            if not (
+                getattr(msg, "type", None) == "tool"
+                and getattr(msg, "tool_call_id", None) in orphan_results
+            )
+        ]
+        # Add any patches for dangling calls
+        filtered_messages.extend(patches)
 
-    if not patches and not orphan_results:
-        return {"status": "ok", "patched": 0, "message": "No dangling tool calls found"}
+        try:
+            # Overwrite the entire messages list
+            await agent.aupdate_state(
+                config,
+                {"messages": filtered_messages},
+                as_node="__start__",  # Use __start__ to replace entire state
+            )
+            logger.info(
+                "Repaired thread - removed orphan results and added patches",
+                thread_id=thread_id,
+                removed=len(orphan_results),
+                patched=len(patches),
+            )
+            return {
+                "status": "ok",
+                "patched": len(orphan_results) + len(patches),
+                "message": f"Removed {len(orphan_results)} orphan tool result(s)" +
+                          (f" and patched {len(patches)} dangling call(s)" if patches else ""),
+            }
+        except Exception as e:
+            logger.exception("Failed to update state for repair")
+            raise HTTPException(500, f"Failed to repair thread: {str(e)}") from e
 
-    if orphan_results and not patches:
-        # The problem is orphan results, not missing results
-        return {
-            "status": "error",
-            "patched": 0,
-            "message": f"Found {len(orphan_results)} orphan tool result(s) with no matching tool_use. This requires manual cleanup or starting a new thread.",
-            "orphan_ids": list(orphan_results),
-        }
-
-    # Update state with the patched messages
+    # Only dangling calls (no orphan results) - just add the patches
     try:
         await agent.aupdate_state(
             config,
