@@ -968,22 +968,45 @@ async def repair_thread(
     if not messages:
         return {"status": "ok", "patched": 0, "message": "No messages to repair"}
 
-    # Find dangling tool calls
-    tool_result_ids = set()
+    # Build sets of tool call IDs and tool result IDs
+    tool_call_ids = set()  # IDs from AI messages' tool_calls
+    tool_result_ids = set()  # IDs from ToolMessages
+
     for msg in messages:
-        if getattr(msg, "type", None) == "tool":
+        msg_type = getattr(msg, "type", None)
+        if msg_type == "tool":
             tool_call_id = getattr(msg, "tool_call_id", None)
             if tool_call_id:
                 tool_result_ids.add(tool_call_id)
+        elif msg_type == "ai" and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tc_id:
+                    tool_call_ids.add(tc_id)
 
-    # Build list of missing tool messages
+    # Find dangling tool calls (AI requested but no result)
+    dangling_calls = tool_call_ids - tool_result_ids
+    # Find orphan tool results (result exists but no matching AI request)
+    orphan_results = tool_result_ids - tool_call_ids
+
+    logger.info(
+        "Repair analysis",
+        thread_id=thread_id,
+        total_messages=len(messages),
+        tool_call_ids=len(tool_call_ids),
+        tool_result_ids=len(tool_result_ids),
+        dangling_calls=len(dangling_calls),
+        orphan_results=len(orphan_results),
+    )
+
+    # Build patches for dangling tool calls (add missing ToolMessages)
     patches = []
     for msg in messages:
         if getattr(msg, "type", None) == "ai" and getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
                 tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
-                if tc_id and tc_id not in tool_result_ids:
+                if tc_id and tc_id in dangling_calls:
                     patches.append(
                         ToolMessage(
                             content=f"Tool {tc_name} was interrupted/cancelled.",
@@ -991,10 +1014,27 @@ async def repair_thread(
                             tool_call_id=tc_id,
                         )
                     )
-                    tool_result_ids.add(tc_id)
 
-    if not patches:
+    # For orphan results, we need to remove them - but LangGraph doesn't support
+    # direct message removal easily. Log for now.
+    if orphan_results:
+        logger.warning(
+            "Found orphan tool results (no matching tool_use)",
+            thread_id=thread_id,
+            orphan_ids=list(orphan_results),
+        )
+
+    if not patches and not orphan_results:
         return {"status": "ok", "patched": 0, "message": "No dangling tool calls found"}
+
+    if orphan_results and not patches:
+        # The problem is orphan results, not missing results
+        return {
+            "status": "error",
+            "patched": 0,
+            "message": f"Found {len(orphan_results)} orphan tool result(s) with no matching tool_use. This requires manual cleanup or starting a new thread.",
+            "orphan_ids": list(orphan_results),
+        }
 
     # Update state with the patched messages
     try:
