@@ -21,8 +21,7 @@ import typing
 from typing import Any, Callable, Sequence
 
 import structlog
-from deepagents import create_deep_agent
-from deepagents.middleware.subagents import SubAgentMiddleware
+from langchain.agents import create_agent
 from langchain.agents.middleware import (
     dynamic_prompt,
     wrap_model_call,
@@ -32,7 +31,12 @@ from langchain.agents.middleware import (
     AgentState,
     AgentMiddleware,
     SummarizationMiddleware,
+    TodoListMiddleware,
 )
+# Import deepagents middleware (but not create_deep_agent - we use create_agent directly)
+from deepagents.middleware.subagents import SubAgentMiddleware
+from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.backends import StateBackend
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
@@ -434,16 +438,44 @@ He operates in isolated context and returns a focused review. This helps keep yo
     ],
 }
 subagents = [REVIEWER_SUBAGENT]
-# Create the inner agent (without subconscious middleware - that's now a node)
-_inner_agent = create_deep_agent(
+
+# Backend for filesystem middleware (ephemeral state storage)
+backend = lambda rt: StateBackend(rt)
+
+# Build subagent middleware stack (used by SubAgentMiddleware for spawned agents)
+subagent_middleware = [
+    TodoListMiddleware(),
+    FilesystemMiddleware(backend=backend),
+    SummarizationMiddleware(
+        model="openai:gpt-5-mini",
+        trigger={"fraction": 0.85},
+        keep={"messages": 6},
+    ),
+]
+
+# Create the inner agent using create_agent directly (not create_deep_agent)
+# This gives us full control over middleware, especially SummarizationMiddleware model
+_inner_agent = create_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
     middleware=[
         # Generative UI state - registers ui field with ui_message_reducer
         # Must be first to ensure state schema is available to other middleware
         GenerativeUIMiddleware(),
-        # Override built-in SummarizationMiddleware which defaults to Claude
-        # Use gpt-5-mini for cost efficiency since we don't have Claude access
+        # TodoListMiddleware - provides write_todos tool for task planning
+        TodoListMiddleware(),
+        # FilesystemMiddleware - provides ls, read_file, write_file, edit_file, glob, grep
+        FilesystemMiddleware(backend=backend),
+        # SubAgentMiddleware - provides task tool to spawn isolated subagents
+        SubAgentMiddleware(
+            default_model=DEFAULT_MODEL,
+            default_tools=ALL_TOOLS,
+            subagents=subagents,
+            default_middleware=subagent_middleware,
+            general_purpose_agent=True,
+        ),
+        # SummarizationMiddleware - auto-summarizes when context gets long
+        # Using gpt-5-mini instead of default Claude (which we don't have access to)
         SummarizationMiddleware(
             model="openai:gpt-5-mini",
             trigger={"fraction": 0.85},
@@ -453,12 +485,11 @@ _inner_agent = create_deep_agent(
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
         build_system_prompt,
-        # Custom: Patch dangling tool calls
+        # Custom: Patch dangling tool calls AND orphan tool results
         patch_dangling_tool_calls,
     ],
     name="agent",
-    subagents=subagents
-)
+).with_config({"recursion_limit": 1000})
 
 
 # =============================================================================
