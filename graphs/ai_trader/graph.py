@@ -138,9 +138,11 @@ async def dynamic_model_selection(
 
     # Initialize model based on name - use explicit class to ensure proper type detection
     is_claude = model_name.startswith("claude")
+    # Get retry config - default to 3 retries for transient errors (overloaded, rate limits)
+    max_retries = ctx.get("max_retries", 3)
 
     if is_claude:
-        model = ChatAnthropic(model=model_name)
+        model = ChatAnthropic(model=model_name, max_retries=max_retries)
         thinking_budget = ctx.get("thinking_budget") or 0
         if thinking_budget > 0:
             model = model.bind(
@@ -148,7 +150,7 @@ async def dynamic_model_selection(
             )
     else:
         # Default to OpenAI for all other models
-        model = ChatOpenAI(model=model_name)
+        model = ChatOpenAI(model=model_name, max_retries=max_retries)
         reasoning_effort = ctx.get("reasoning_effort")
         if reasoning_effort and reasoning_effort != "none":
             model = model.bind(reasoning_effort=reasoning_effort)
@@ -333,18 +335,19 @@ async def reviewer_dynamic_model_selection(
 
     ctx = request.runtime.context or {}
     model_name = ctx.get("reviewer_model", os.environ.get("REVIEWER_MODEL", "gpt-4o-mini"))
+    max_retries = ctx.get("reviewer_max_retries", 3)
 
     is_claude = model_name.startswith("claude")
 
     if is_claude:
-        model = ChatAnthropic(model=model_name)
+        model = ChatAnthropic(model=model_name, max_retries=max_retries)
         thinking_budget = ctx.get("reviewer_thinking_budget") or 0
         if thinking_budget > 0:
             model = model.bind(
                 thinking={"type": "enabled", "budget_tokens": thinking_budget}
             )
     else:
-        model = ChatOpenAI(model=model_name)
+        model = ChatOpenAI(model=model_name, max_retries=max_retries)
         reasoning_effort = ctx.get("reviewer_reasoning_effort")
         if reasoning_effort and reasoning_effort != "none":
             model = model.bind(reasoning_effort=reasoning_effort)
