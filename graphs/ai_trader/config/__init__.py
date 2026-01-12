@@ -76,20 +76,20 @@ AGENTS = {
     "main": {
         "name": "main-agent-1",
         "description": "Lead Quant Dev - writes code and hands off for review",
-        "model": "gpt-5.2",
-        "max_tokens": 50000,
-        "thinking_budget": None,  # GPT uses reasoning_effort instead
-        "reasoning_effort": "high",
+        "model": DEFAULT_MODEL,  # claude-opus-4-5-20251101
+        "max_tokens": 32000,
+        "thinking_budget": 10000,  # Extended thinking for complex tasks
+        "reasoning_effort": None,  # Claude uses thinking_budget instead
         "verbosity": "low",
         "system_prompt": MAIN_PROMPT["prompt"],
     },
     "reviewer": {
         "name": "support-agent-2",
         "description": "Code Reviewer (Doubtful Deacon) - critiques and improves",
-        "model": "gpt-5.2",
-        "max_tokens": 50000,
-        "thinking_budget": None,
-        "reasoning_effort": "high",
+        "model": DEFAULT_MODEL,  # claude-opus-4-5-20251101
+        "max_tokens": 32000,
+        "thinking_budget": 10000,  # Extended thinking for thorough reviews
+        "reasoning_effort": None,  # Claude uses thinking_budget instead
         "verbosity": "low",
         "system_prompt": REVIEWER_PROMPT["prompt"],
     },

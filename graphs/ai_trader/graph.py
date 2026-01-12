@@ -44,6 +44,7 @@ from langgraph.graph.ui import AnyUIMessage, ui_message_reducer
 from graphs.ai_trader.context import Context
 from graphs.ai_trader.prompts import DEFAULT_MAIN_PROMPT
 from graphs.ai_trader.nodes.subconscious import subconscious_node
+from graphs.ai_trader.config import DEFAULT_MODEL as CONFIG_DEFAULT_MODEL
 
 # Import all tools
 from graphs.ai_trader.tools.ai_services import TOOLS as AI_SERVICES_TOOLS
@@ -117,7 +118,7 @@ async def dynamic_model_selection(
     from langchain_anthropic import ChatAnthropic
 
     ctx = request.runtime.context or {}
-    model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", "gpt-5.2"))
+    model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", CONFIG_DEFAULT_MODEL))
 
     # Log message structure before sending to model (INFO level for visibility)
     logger.info(
@@ -407,11 +408,20 @@ def reviewer_build_system_prompt(state: dict, *args, **kwargs) -> str:
 
 # Default model from environment with custom profile for 100k summarization trigger
 # create_deep_agent uses 85% of max_input_tokens as trigger, so 118k -> ~100k trigger
-DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
-DEFAULT_MODEL = ChatOpenAI(
-    model=DEFAULT_MODEL_NAME,
-    profile={"max_input_tokens": 118000}
-)
+DEFAULT_MODEL_NAME = os.environ.get("DEFAULT_MODEL", CONFIG_DEFAULT_MODEL)
+
+# Create the appropriate model class based on model name
+# Note: This is just a placeholder - dynamic_model_selection middleware handles actual model creation
+if DEFAULT_MODEL_NAME.startswith("claude"):
+    from langchain_anthropic import ChatAnthropic
+    DEFAULT_MODEL = ChatAnthropic(
+        model=DEFAULT_MODEL_NAME,
+    )
+else:
+    DEFAULT_MODEL = ChatOpenAI(
+        model=DEFAULT_MODEL_NAME,
+        profile={"max_input_tokens": 118000}
+    )
 
 # Configure the reviewer as a dict-based subagent with dynamic middleware
 REVIEWER_SUBAGENT = {
