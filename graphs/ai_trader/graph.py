@@ -115,8 +115,8 @@ async def dynamic_model_selection(
     ctx = request.runtime.context or {}
     model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", "gpt-5.2"))
 
-    # Debug: Log message structure before sending to model
-    logger.debug(
+    # Log message structure before sending to model (INFO level for visibility)
+    logger.info(
         "Messages before model call",
         model=model_name,
         message_count=len(request.messages),
@@ -127,7 +127,7 @@ async def dynamic_model_selection(
         tool_call_id = getattr(msg, "tool_call_id", None)
         msg_id = getattr(msg, "id", None)
         content_preview = str(getattr(msg, "content", ""))[:100]
-        logger.debug(
+        logger.info(
             f"Message {i}",
             msg_type=msg_type,
             msg_id=msg_id,
