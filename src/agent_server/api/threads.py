@@ -911,3 +911,108 @@ async def search_threads(
 
     # Return array of threads for client/vendor parity
     return threads_models
+
+
+@router.post("/threads/{thread_id}/repair")
+async def repair_thread(
+    thread_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Repair a thread by patching dangling tool calls in its state.
+
+    This fixes the error where an AI message has tool_calls but no corresponding
+    ToolMessage with matching tool_call_id (happens when runs are interrupted).
+    """
+    from langchain_core.messages import ToolMessage
+
+    # Verify thread exists and belongs to user
+    stmt = select(ThreadORM).where(
+        ThreadORM.thread_id == thread_id, ThreadORM.user_id == user.identity
+    )
+    thread = await session.scalar(stmt)
+    if not thread:
+        raise HTTPException(404, f"Thread '{thread_id}' not found")
+
+    thread_metadata = thread.metadata_json or {}
+    graph_id = thread_metadata.get("graph_id")
+    if not graph_id:
+        raise HTTPException(400, f"Thread '{thread_id}' has no associated graph")
+
+    from ..services.langgraph_service import (
+        create_thread_config,
+        get_langgraph_service,
+    )
+
+    langgraph_service = get_langgraph_service()
+    try:
+        agent = await langgraph_service.get_graph(graph_id)
+    except Exception as e:
+        logger.exception("Failed to load graph '%s' for repair", graph_id)
+        raise HTTPException(500, f"Failed to load graph '{graph_id}': {str(e)}") from e
+
+    config = create_thread_config(thread_id, user, {})
+    agent = agent.with_config(config)
+
+    # Get current state
+    try:
+        state_snapshot = await agent.aget_state(config)
+    except Exception as e:
+        logger.exception("Failed to get state for repair")
+        raise HTTPException(500, f"Failed to get thread state: {str(e)}") from e
+
+    if not state_snapshot or not state_snapshot.values:
+        return {"status": "ok", "patched": 0, "message": "No state to repair"}
+
+    messages = state_snapshot.values.get("messages", [])
+    if not messages:
+        return {"status": "ok", "patched": 0, "message": "No messages to repair"}
+
+    # Find dangling tool calls
+    tool_result_ids = set()
+    for msg in messages:
+        if getattr(msg, "type", None) == "tool":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                tool_result_ids.add(tool_call_id)
+
+    # Build list of missing tool messages
+    patches = []
+    for msg in messages:
+        if getattr(msg, "type", None) == "ai" and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                if tc_id and tc_id not in tool_result_ids:
+                    patches.append(
+                        ToolMessage(
+                            content=f"Tool {tc_name} was interrupted/cancelled.",
+                            name=tc_name,
+                            tool_call_id=tc_id,
+                        )
+                    )
+                    tool_result_ids.add(tc_id)
+
+    if not patches:
+        return {"status": "ok", "patched": 0, "message": "No dangling tool calls found"}
+
+    # Update state with the patched messages
+    try:
+        await agent.aupdate_state(
+            config,
+            {"messages": patches},
+            as_node="agent",  # Add as if from agent node
+        )
+        logger.info(
+            "Repaired thread with patched tool messages",
+            thread_id=thread_id,
+            patched_count=len(patches),
+        )
+        return {
+            "status": "ok",
+            "patched": len(patches),
+            "message": f"Patched {len(patches)} dangling tool call(s)",
+        }
+    except Exception as e:
+        logger.exception("Failed to update state for repair")
+        raise HTTPException(500, f"Failed to repair thread: {str(e)}") from e
