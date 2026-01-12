@@ -115,6 +115,27 @@ async def dynamic_model_selection(
     ctx = request.runtime.context or {}
     model_name = ctx.get("model", os.environ.get("DEFAULT_MODEL", "gpt-5.2"))
 
+    # Debug: Log message structure before sending to model
+    logger.debug(
+        "Messages before model call",
+        model=model_name,
+        message_count=len(request.messages),
+    )
+    for i, msg in enumerate(request.messages):
+        msg_type = getattr(msg, "type", "unknown")
+        tool_calls = getattr(msg, "tool_calls", None)
+        tool_call_id = getattr(msg, "tool_call_id", None)
+        msg_id = getattr(msg, "id", None)
+        content_preview = str(getattr(msg, "content", ""))[:100]
+        logger.debug(
+            f"Message {i}",
+            msg_type=msg_type,
+            msg_id=msg_id,
+            tool_call_id=tool_call_id,
+            tool_calls=[tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None) for tc in (tool_calls or [])],
+            content_preview=content_preview,
+        )
+
     # Initialize model based on name - use explicit class to ensure proper type detection
     is_claude = model_name.startswith("claude")
 
