@@ -31,7 +31,6 @@ from langchain.agents.middleware import (
     ModelResponse,
     AgentState,
     AgentMiddleware,
-    SummarizationMiddleware,
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, RemoveMessage
@@ -442,19 +441,9 @@ _inner_agent = create_deep_agent(
         # Generative UI state - registers ui field with ui_message_reducer
         # Must be first to ensure state schema is available to other middleware
         GenerativeUIMiddleware(),
-        # Summarization middleware - uses gpt-5-mini for cost efficiency
-        # Triggers at 85% of context, keeps last 6 messages
-        SummarizationMiddleware(
-            model="openai:gpt-5-mini",
-            trigger={"fraction": 0.85},
-            keep={"messages": 6},
-        ),
-        # Subagent support via SubAgentMiddleware
-        # SubAgentMiddleware(
-        #     default_model=DEFAULT_MODEL,
-        #     default_tools=[],
-        #     subagents=[REVIEWER_SUBAGENT],
-        # ),
+        # Note: SummarizationMiddleware is built-in to create_deep_agent
+        # It uses the same model we pass (DEFAULT_MODEL = gpt-5.2)
+        # Triggers at 85% of max_input_tokens, keeps 10% or 6 messages
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
