@@ -35,8 +35,7 @@ from langchain.agents.middleware import (
 )
 # Import deepagents middleware (but not create_deep_agent - we use create_agent directly)
 from deepagents.middleware.subagents import SubAgentMiddleware
-from deepagents.middleware.filesystem import FilesystemMiddleware
-from deepagents.backends import StateBackend
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
@@ -439,22 +438,32 @@ He operates in isolated context and returns a focused review. This helps keep yo
 }
 subagents = [REVIEWER_SUBAGENT]
 
-# Backend for filesystem middleware (ephemeral state storage)
-backend = lambda rt: StateBackend(rt)
-
 # Build subagent middleware stack (used by SubAgentMiddleware for spawned agents)
+# Note: We don't use FilesystemMiddleware since we have our own QC file tools
 subagent_middleware = [
     TodoListMiddleware(),
-    FilesystemMiddleware(backend=backend),
     SummarizationMiddleware(
         model="openai:gpt-5-mini",
         trigger={"fraction": 0.85},
         keep={"messages": 6},
     ),
+    AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
 ]
 
 # Create the inner agent using create_agent directly (not create_deep_agent)
 # This gives us full control over middleware, especially SummarizationMiddleware model
+#
+# Middleware from deepagents we use:
+# - TodoListMiddleware: write_todos tool for task planning
+# - SubAgentMiddleware: task tool to spawn isolated subagents (e.g. reviewer)
+# - SummarizationMiddleware: auto-summarize when context gets long (with gpt-5-mini)
+# - AnthropicPromptCachingMiddleware: caches prompts when using Claude (ignores GPT)
+#
+# Middleware from deepagents we DON'T use:
+# - FilesystemMiddleware: we have our own QC file tools
+# - MemoryMiddleware: not configured
+# - SkillsMiddleware: not configured
+#
 _inner_agent = create_agent(
     model=DEFAULT_MODEL,
     tools=ALL_TOOLS,
@@ -464,8 +473,6 @@ _inner_agent = create_agent(
         GenerativeUIMiddleware(),
         # TodoListMiddleware - provides write_todos tool for task planning
         TodoListMiddleware(),
-        # FilesystemMiddleware - provides ls, read_file, write_file, edit_file, glob, grep
-        FilesystemMiddleware(backend=backend),
         # SubAgentMiddleware - provides task tool to spawn isolated subagents
         SubAgentMiddleware(
             default_model=DEFAULT_MODEL,
@@ -481,6 +488,9 @@ _inner_agent = create_agent(
             trigger={"fraction": 0.85},
             keep={"messages": 6},
         ),
+        # AnthropicPromptCachingMiddleware - caches prompts for Claude models
+        # Set to "ignore" so it doesn't error when using GPT models
+        AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
