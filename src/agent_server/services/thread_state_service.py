@@ -11,6 +11,69 @@ from ..models.threads import ThreadCheckpoint, ThreadState
 logger = structlog.getLogger(__name__)
 
 
+def _patch_dangling_tool_calls(messages: list[Any]) -> list[Any]:
+    """Patch dangling tool calls in messages list.
+
+    This handles the case where an AI message has tool_calls but there's no
+    corresponding ToolMessage with the matching tool_call_id. This can happen
+    when a run is interrupted mid-tool-call.
+
+    We add synthetic ToolMessages for any dangling tool calls so the message
+    history is valid for LLM APIs that require tool_call/tool_result pairing.
+    """
+    if not messages:
+        return messages
+
+    # Build set of existing tool result IDs
+    tool_result_ids = set()
+    for msg in messages:
+        # Handle both dict and object forms
+        if isinstance(msg, dict):
+            if msg.get("type") == "tool" and msg.get("tool_call_id"):
+                tool_result_ids.add(msg["tool_call_id"])
+        elif hasattr(msg, "type") and getattr(msg, "type", None) == "tool":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                tool_result_ids.add(tool_call_id)
+
+    # Check if any AI messages have dangling tool calls
+    patched = []
+    for msg in messages:
+        patched.append(msg)
+
+        # Get tool_calls from message (dict or object)
+        tool_calls = None
+        msg_type = None
+        if isinstance(msg, dict):
+            tool_calls = msg.get("tool_calls")
+            msg_type = msg.get("type")
+        else:
+            tool_calls = getattr(msg, "tool_calls", None)
+            msg_type = getattr(msg, "type", None)
+
+        if msg_type == "ai" and tool_calls:
+            for tc in tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+
+                if tc_id and tc_id not in tool_result_ids:
+                    # Add synthetic tool result
+                    logger.warning(
+                        "Patching dangling tool call in snapshot",
+                        tool_call_id=tc_id,
+                        tool_name=tc_name,
+                    )
+                    patched.append({
+                        "type": "tool",
+                        "name": tc_name,
+                        "tool_call_id": tc_id,
+                        "content": f"Tool {tc_name} was interrupted/cancelled.",
+                    })
+                    tool_result_ids.add(tc_id)  # Don't double-patch
+
+    return patched
+
+
 class ThreadStateService:
     """Service for converting LangGraph snapshots to ThreadState objects"""
 
@@ -27,9 +90,14 @@ class ThreadStateService:
             next_nodes = getattr(snapshot, "next", []) or []
             metadata = getattr(snapshot, "metadata", {}) or {}
             created_at = self._extract_created_at(snapshot)
-            
+
+            # Patch dangling tool calls in messages to prevent API errors
+            if isinstance(values, dict) and "messages" in values:
+                values = dict(values)  # Make a copy to avoid mutating original
+                values["messages"] = _patch_dangling_tool_calls(values["messages"])
+
             # Debug: Log the keys in values to see if 'ui' is present
-            logger.info(
+            logger.debug(
                 "Snapshot values keys",
                 thread_id=thread_id,
                 value_keys=list(values.keys()) if isinstance(values, dict) else "not_a_dict",
