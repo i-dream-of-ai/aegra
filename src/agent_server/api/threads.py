@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from langchain_core.messages import RemoveMessage, ToolMessage
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -923,9 +924,8 @@ async def repair_thread(
 
     This fixes the error where an AI message has tool_calls but no corresponding
     ToolMessage with matching tool_call_id (happens when runs are interrupted).
+    Also removes orphan tool results (ToolMessage with no matching tool_call).
     """
-    from langchain_core.messages import ToolMessage
-
     # Verify thread exists and belongs to user
     stmt = select(ThreadORM).where(
         ThreadORM.thread_id == thread_id, ThreadORM.user_id == user.identity
@@ -1018,46 +1018,66 @@ async def repair_thread(
     if not patches and not orphan_results:
         return {"status": "ok", "patched": 0, "message": "No issues found"}
 
-    # If there are orphan results, filter them out from messages
+    # If there are orphan results, use RemoveMessage to delete them
+    # NOTE: The messages field uses add_messages reducer which is append-only.
+    # Filtering and passing a new list doesn't work - we must use RemoveMessage.
     if orphan_results:
-        logger.info(
-            "Removing orphan tool results",
-            thread_id=thread_id,
-            orphan_ids=list(orphan_results),
-        )
-        # Filter out ToolMessages with orphan tool_call_ids
-        filtered_messages = [
-            msg for msg in messages
-            if not (
+        # Find the message IDs for orphan tool results
+        orphan_msg_ids = []
+        for msg in messages:
+            if (
                 getattr(msg, "type", None) == "tool"
                 and getattr(msg, "tool_call_id", None) in orphan_results
-            )
-        ]
-        # Add any patches for dangling calls
-        filtered_messages.extend(patches)
+            ):
+                msg_id = getattr(msg, "id", None)
+                if msg_id:
+                    orphan_msg_ids.append(msg_id)
+                else:
+                    logger.warning(
+                        "Orphan tool result has no message ID, cannot remove",
+                        tool_call_id=getattr(msg, "tool_call_id", None),
+                    )
 
-        try:
-            # Overwrite the entire messages list
-            await agent.aupdate_state(
-                config,
-                {"messages": filtered_messages},
-                as_node="__start__",  # Use __start__ to replace entire state
-            )
-            logger.info(
-                "Repaired thread - removed orphan results and added patches",
-                thread_id=thread_id,
-                removed=len(orphan_results),
-                patched=len(patches),
-            )
+        logger.info(
+            "Removing orphan tool results via RemoveMessage",
+            thread_id=thread_id,
+            orphan_tool_call_ids=list(orphan_results),
+            orphan_msg_ids=orphan_msg_ids,
+        )
+
+        # Build update with RemoveMessage for each orphan + any patches
+        updates = [RemoveMessage(id=msg_id) for msg_id in orphan_msg_ids]
+        updates.extend(patches)
+
+        if updates:
+            try:
+                await agent.aupdate_state(
+                    config,
+                    {"messages": updates},
+                    as_node="agent",  # Use agent node for proper state update
+                )
+                logger.info(
+                    "Repaired thread - removed orphan results and added patches",
+                    thread_id=thread_id,
+                    removed=len(orphan_msg_ids),
+                    patched=len(patches),
+                )
+                return {
+                    "status": "ok",
+                    "patched": len(orphan_msg_ids) + len(patches),
+                    "message": f"Removed {len(orphan_msg_ids)} orphan tool result(s)" +
+                              (f" and patched {len(patches)} dangling call(s)" if patches else ""),
+                }
+            except Exception as e:
+                logger.exception("Failed to update state for repair")
+                raise HTTPException(500, f"Failed to repair thread: {str(e)}") from e
+        else:
+            # Orphan results existed but none had message IDs
             return {
-                "status": "ok",
-                "patched": len(orphan_results) + len(patches),
-                "message": f"Removed {len(orphan_results)} orphan tool result(s)" +
-                          (f" and patched {len(patches)} dangling call(s)" if patches else ""),
+                "status": "warning",
+                "patched": 0,
+                "message": f"Found {len(orphan_results)} orphan tool results but none had message IDs to remove",
             }
-        except Exception as e:
-            logger.exception("Failed to update state for repair")
-            raise HTTPException(500, f"Failed to repair thread: {str(e)}") from e
 
     # Only dangling calls (no orphan results) - just add the patches
     try:
