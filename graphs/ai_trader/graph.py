@@ -225,22 +225,45 @@ def build_system_prompt(state: AITraderState, *args, **kwargs) -> str:
 
 @before_model
 def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str, Any] | None:
-    """Patch any dangling tool calls before model invocation."""
+    """Patch dangling tool calls AND filter orphan tool results before model invocation.
+
+    Handles two cases:
+    1. Dangling tool calls: AI message has tool_calls but no corresponding ToolMessage
+       -> Add synthetic ToolMessage with "interrupted" content
+    2. Orphan tool results: ToolMessage exists but no AI message has matching tool_call
+       -> Remove the orphan ToolMessage entirely
+    """
     messages = list(state["messages"])
     if not messages:
         return None
 
-    patched = []
+    # Build set of all tool_call IDs from AI messages
+    valid_tool_call_ids = set()
+    for msg in messages:
+        if getattr(msg, "type", None) == "ai" and getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tc_id:
+                    valid_tool_call_ids.add(tc_id)
+
+    # Build dict of tool results (keyed by tool_call_id)
     tool_results = {
         m.tool_call_id: m
         for m in messages
         if getattr(m, "type", None) == "tool" and getattr(m, "tool_call_id", None)
     }
 
+    # Check for orphan tool results (results with no matching tool_call)
+    orphan_ids = set(tool_results.keys()) - valid_tool_call_ids
+    if orphan_ids:
+        logger.warning("Filtering orphan tool results", orphan_ids=list(orphan_ids))
+
+    patched = []
     i = 0
     while i < len(messages):
         msg = messages[i]
 
+        # Skip tool messages - they'll be added after their corresponding AI message
         if getattr(msg, "type", None) == "tool":
             i += 1
             continue
@@ -249,14 +272,14 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
 
         if getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
-                tool_call_id = tc.get("id")
+                tool_call_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
                 if not tool_call_id:
                     continue
 
                 if tool_call_id in tool_results:
                     patched.append(tool_results[tool_call_id])
                 else:
-                    tool_name = tc.get("name", "unknown")
+                    tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
                     logger.warning("Patching dangling tool call", tool_call_id=tool_call_id)
                     patched.append(
                         ToolMessage(
@@ -267,8 +290,8 @@ def patch_dangling_tool_calls(state: AITraderState, *args, **kwargs) -> dict[str
                     )
         i += 1
 
-    # Only return update if messages changed
-    if patched != messages:
+    # Return update if messages changed (different length or orphans removed)
+    if len(patched) != len(messages) or orphan_ids:
         return {"messages": patched}
     return None
 
