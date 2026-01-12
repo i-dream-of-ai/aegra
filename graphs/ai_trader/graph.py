@@ -23,7 +23,6 @@ from typing import Any, Callable, Sequence
 import structlog
 from deepagents import create_deep_agent
 from deepagents.middleware.subagents import SubAgentMiddleware
-from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from langchain.agents.middleware import (
     dynamic_prompt,
     wrap_model_call,
@@ -383,7 +382,6 @@ He operates in isolated context and returns a focused review. This helps keep yo
     "middleware": [
         reviewer_dynamic_model_selection,
         reviewer_build_system_prompt,
-        PatchToolCallsMiddleware(),
     ],
 }
 subagents = [REVIEWER_SUBAGENT]
