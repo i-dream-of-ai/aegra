@@ -444,7 +444,7 @@ async def list_backtests(
 
         result = await qc_request(
             "/backtests/list",
-            {"projectId": qc_project_id},
+            {"projectId": qc_project_id, "includeStatistics": True},
         )
 
         all_backtests = result.get("backtests", [])
@@ -457,17 +457,17 @@ async def list_backtests(
 
         backtests = []
         for bt in page_backtests:
-            stats = bt.get("statistics", {})
+            # With includeStatistics=True, stats are inline in the backtest object
             backtests.append(
                 {
                     "backtest_id": bt.get("backtestId"),
                     "name": bt.get("name", "Unknown"),
-                    "status": "Completed" if bt.get("completed") else "Running",
+                    "status": bt.get("status", "Unknown"),
                     "created": bt.get("created"),
-                    "net_profit": stats.get("Net Profit"),
-                    "cagr": stats.get("Compounding Annual Return"),
-                    "sharpe_ratio": stats.get("Sharpe Ratio"),
-                    "max_drawdown": stats.get("Drawdown"),
+                    "net_profit": bt.get("netProfit"),
+                    "cagr": bt.get("compoundingAnnualReturn"),
+                    "sharpe_ratio": bt.get("sharpeRatio"),
+                    "max_drawdown": bt.get("drawdown"),
                 }
             )
 
