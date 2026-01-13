@@ -353,17 +353,30 @@ async def read_backtest_orders(
         total_orders = data.get("totalOrders", len(orders))
         total_pages = (total_orders + page_size - 1) // page_size
 
+        ui_data = {
+            "backtest_id": backtest_id,
+            "orders": orders,
+            "pagination": {
+                "current_page": page,
+                "page_size": page_size,
+                "total_results": total_orders,
+                "total_pages": total_pages,
+                "has_more_pages": page < total_pages,
+            },
+        }
+
+        # Emit generative UI component for clean order display
+        push_ui_message("backtest-orders", ui_data, message={"id": runtime.tool_call_id})
+
+        # Return summary for LLM context (not full orders to avoid context bloat)
         return json.dumps(
             {
-                "pagination": {
-                    "current_page": page,
-                    "page_size": page_size,
-                    "total_results": total_orders,
-                    "total_pages": total_pages,
-                    "has_more_pages": page < total_pages,
-                },
                 "backtest_id": backtest_id,
-                "orders": orders,
+                "total_orders": total_orders,
+                "page": page,
+                "page_size": page_size,
+                "has_more_pages": page < total_pages,
+                "summary": f"Retrieved {len(orders)} orders (page {page}/{total_pages}). Full order data displayed in UI.",
             },
             indent=2,
         )
