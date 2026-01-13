@@ -463,6 +463,7 @@ subagent_middleware = [
         model="openai:gpt-5-mini",
         trigger=("tokens", 100000),
         keep=("messages", 6),
+        trim_tokens_to_summarize=50000,  # gpt-5-mini supports 128k context
     ),
     AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
 ]
@@ -510,6 +511,7 @@ _inner_agent = create_agent(
             model="openai:gpt-5-mini",
             trigger=("tokens", 100000),
             keep=("messages", 6),
+            trim_tokens_to_summarize=50000,  # gpt-5-mini supports 128k context
         ),
         # AnthropicPromptCachingMiddleware - caches prompts for Claude models
         # Set to "ignore" so it doesn't error when using GPT models
