@@ -455,15 +455,18 @@ subagents = [REVIEWER_SUBAGENT]
 subagent_middleware = [
     TodoListMiddleware(),
     # ContextEditingMiddleware - prunes old tool outputs before summarization
-    # Triggers at 150k tokens, keeps last 3 tool results, replaces rest with [cleared]
+    # Triggers at 120k tokens, keeps last 3 tool results, replaces rest with [cleared]
     ContextEditingMiddleware(edits=[
-        ClearToolUsesEdit(trigger=150000, keep=3, placeholder="[output cleared]"),
+        ClearToolUsesEdit(trigger=120000, keep=3, placeholder="[output cleared]"),
     ]),
+    # SummarizationMiddleware - only trigger when really needed (150k tokens)
+    # This is ~75% of Claude's 200k context, giving headroom before hitting limits
+    # For smaller models (128k), context editing at 120k should keep us safe
     SummarizationMiddleware(
         model="openai:gpt-5-mini",
-        trigger=("tokens", 200000),  # Claude's context is 200k, trigger near that
+        trigger=("tokens", 150000),
         keep=("messages", 6),
-        trim_tokens_to_summarize=50000,  # gpt-5-mini supports 128k context
+        trim_tokens_to_summarize=50000,
     ),
     AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
 ]
@@ -500,18 +503,19 @@ _inner_agent = create_agent(
             general_purpose_agent=True,
         ),
         # ContextEditingMiddleware - prunes old tool outputs to save tokens
-        # Triggers at 150k tokens, keeps last 3 tool results, replaces rest with [cleared]
+        # Triggers at 120k tokens, keeps last 3 tool results, replaces rest with [cleared]
         # Runs BEFORE summarization to reduce context size first
         ContextEditingMiddleware(edits=[
-            ClearToolUsesEdit(trigger=150000, keep=3, placeholder="[output cleared]"),
+            ClearToolUsesEdit(trigger=120000, keep=3, placeholder="[output cleared]"),
         ]),
-        # SummarizationMiddleware - auto-summarizes when context gets long
-        # Using gpt-5-mini instead of default Claude (which we don't have access to)
+        # SummarizationMiddleware - only trigger when really needed (150k tokens)
+        # This is ~75% of Claude's 200k context, giving headroom before hitting limits
+        # For smaller models (128k), context editing at 120k should keep us safe
         SummarizationMiddleware(
             model="openai:gpt-5-mini",
-            trigger=("tokens", 200000),  # Claude's context is 200k, trigger near that
+            trigger=("tokens", 150000),
             keep=("messages", 6),
-            trim_tokens_to_summarize=50000,  # gpt-5-mini supports 128k context
+            trim_tokens_to_summarize=50000,
         ),
         # AnthropicPromptCachingMiddleware - caches prompts for Claude models
         # Set to "ignore" so it doesn't error when using GPT models
