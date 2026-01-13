@@ -215,8 +215,9 @@ async def qc_compile_and_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Start non-blocking background streaming of backtest progress
-        start_backtest_streaming(
+        # Stream backtest progress with live equity curve updates
+        # This blocks until backtest completes but streams UI updates
+        await start_backtest_streaming(
             qc_project_id=qc_project_id,
             backtest_id=backtest_id,
             backtest_name=backtest_name,
@@ -224,7 +225,7 @@ async def qc_compile_and_backtest(
         )
 
         return format_success(
-            f"Backtest started! Live progress streaming in background.",
+            f"Backtest completed successfully.",
             {
                 "compile_id": compile_id,
                 "backtest_id": backtest_id,
@@ -385,17 +386,18 @@ async def qc_update_and_run_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Start non-blocking background streaming of backtest progress with live equity curve
-        start_backtest_streaming(
+        # Stream backtest progress with live equity curve updates
+        # This blocks until backtest completes but streams UI updates
+        await start_backtest_streaming(
             qc_project_id=qc_project_id,
             backtest_id=backtest_id,
             backtest_name=backtest_name,
             qc_request=qc_request,
         )
 
-        # Poll for results (still need to wait for completion to save code version)
+        # Fetch final results for code version saving (just one poll, already completed)
         backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id
+            qc_project_id, backtest_id, max_polls=1
         )
 
         if backtest_error:
@@ -597,17 +599,18 @@ async def qc_edit_and_run_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Start non-blocking background streaming of backtest progress with live equity curve
-        start_backtest_streaming(
+        # Stream backtest progress with live equity curve updates
+        # This blocks until backtest completes but streams UI updates
+        await start_backtest_streaming(
             qc_project_id=qc_project_id,
             backtest_id=backtest_id,
             backtest_name=backtest_name,
             qc_request=qc_request,
         )
 
-        # Poll for results (still need to wait for completion to save code version)
+        # Fetch final results for code version saving (just one poll, already completed)
         backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id
+            qc_project_id, backtest_id, max_polls=1
         )
 
         if backtest_error:

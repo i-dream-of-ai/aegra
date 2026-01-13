@@ -5,7 +5,7 @@ import json
 from typing import Callable, Awaitable
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph.ui import push_ui_message
+from langgraph.config import get_stream_writer
 
 
 def get_qc_project_id(config: RunnableConfig) -> int | None:
@@ -60,10 +60,10 @@ async def stream_backtest_progress(
     poll_interval: float = 2.0,
 ) -> None:
     """
-    Stream backtest progress updates as background task.
+    Stream backtest progress updates with live equity curve.
 
-    Polls QC API and emits backtest-progress UI messages with live equity curve.
-    Runs non-blocking - caller should fire and forget.
+    Polls QC API and emits custom stream events for real-time progress.
+    Uses get_stream_writer() to stream within LangGraph execution context.
 
     Args:
         qc_project_id: QuantConnect project ID
@@ -73,10 +73,13 @@ async def stream_backtest_progress(
         max_polls: Maximum polling iterations (default 4 minutes)
         poll_interval: Seconds between polls
     """
+    # Get the stream writer from LangGraph context
+    writer = get_stream_writer()
     equity_curve = []
 
     # Emit initial progress
-    push_ui_message("backtest-progress", {
+    writer({
+        "type": "backtest_progress",
         "backtestId": backtest_id,
         "backtestName": backtest_name,
         "status": "running",
@@ -103,7 +106,8 @@ async def stream_backtest_progress(
                 status_backtest.get("error") or status_backtest.get("hasInitializeError")
             ):
                 error_msg = status_backtest.get("error", "Initialization error")
-                push_ui_message("backtest-progress", {
+                writer({
+                    "type": "backtest_progress",
                     "backtestId": backtest_id,
                     "backtestName": backtest_name,
                     "status": "error",
@@ -145,8 +149,9 @@ async def stream_backtest_progress(
                     "totalTrades": stats.get("Total Orders"),
                 }
 
-            # Emit progress update
-            push_ui_message("backtest-progress", {
+            # Emit progress update via custom stream
+            writer({
+                "type": "backtest_progress",
                 "backtestId": backtest_id,
                 "backtestName": backtest_name,
                 "status": "completed" if is_completed else "running",
@@ -164,32 +169,30 @@ async def stream_backtest_progress(
             return
 
 
-def start_backtest_streaming(
+async def start_backtest_streaming(
     qc_project_id: int,
     backtest_id: str,
     backtest_name: str,
     qc_request: Callable[..., Awaitable[dict]],
-) -> asyncio.Task:
+) -> None:
     """
-    Start non-blocking backtest progress streaming.
+    Stream backtest progress with live equity curve updates.
 
-    Returns immediately after spawning background task.
-    The task will stream UI updates until backtest completes or times out.
+    This function polls QC API and emits UI messages as the backtest runs.
+    It blocks until the backtest completes or times out.
+
+    Note: We use blocking polling (not background task) because push_ui_message
+    must be called within the graph execution context to be streamed to the client.
 
     Args:
         qc_project_id: QuantConnect project ID
         backtest_id: Backtest ID to monitor
         backtest_name: Display name for the backtest
         qc_request: Async function to make QC API requests
-
-    Returns:
-        asyncio.Task that can be awaited or cancelled if needed
     """
-    return asyncio.create_task(
-        stream_backtest_progress(
-            qc_project_id=qc_project_id,
-            backtest_id=backtest_id,
-            backtest_name=backtest_name,
-            qc_request=qc_request,
-        )
+    await stream_backtest_progress(
+        qc_project_id=qc_project_id,
+        backtest_id=backtest_id,
+        backtest_name=backtest_name,
+        qc_request=qc_request,
     )
