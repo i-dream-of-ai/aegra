@@ -37,7 +37,7 @@ from langchain.agents.middleware import (
 )
 # Import deepagents middleware (but not create_deep_agent - we use create_agent directly)
 from deepagents.middleware.subagents import SubAgentMiddleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+# Note: AnthropicPromptCachingMiddleware removed - conflicts with OpenAI summarization model
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
@@ -468,7 +468,7 @@ subagent_middleware = [
         keep=("messages", 6),
         trim_tokens_to_summarize=50000,
     ),
-    AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+    # Note: AnthropicPromptCachingMiddleware removed - conflicts with OpenAI summarization model
 ]
 
 # Create the inner agent using create_agent directly (not create_deep_agent)
@@ -517,9 +517,7 @@ _inner_agent = create_agent(
             keep=("messages", 6),
             trim_tokens_to_summarize=50000,
         ),
-        # AnthropicPromptCachingMiddleware - caches prompts for Claude models
-        # Set to "ignore" so it doesn't error when using GPT models
-        AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+        # Note: AnthropicPromptCachingMiddleware removed - conflicts with OpenAI summarization model
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
