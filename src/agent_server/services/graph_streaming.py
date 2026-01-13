@@ -83,6 +83,7 @@ async def stream_graph_events(
     context: dict[str, Any] | None = None,
     subgraphs: bool = False,
     output_keys: list[str] | None = None,
+    durability: str = "sync",  # sync ensures checkpoints saved before each step
     on_checkpoint: Callable[[CheckpointPayload | None], None] = lambda _: None,
     on_task_result: Callable[[TaskResultPayload], None] = lambda _: None,
 ) -> AnyStream:
@@ -265,6 +266,7 @@ async def stream_graph_events(
                 stream_mode=list(stream_modes_set),
                 output_keys=output_keys,
                 subgraphs=subgraphs,
+                durability=durability,
             )
         ) as stream:
             async for event in stream:
