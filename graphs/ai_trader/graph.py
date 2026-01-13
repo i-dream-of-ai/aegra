@@ -32,6 +32,8 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     SummarizationMiddleware,
     TodoListMiddleware,
+    ContextEditingMiddleware,
+    ClearToolUsesEdit,
 )
 # Import deepagents middleware (but not create_deep_agent - we use create_agent directly)
 from deepagents.middleware.subagents import SubAgentMiddleware
@@ -452,6 +454,11 @@ subagents = [REVIEWER_SUBAGENT]
 # Note: We don't use FilesystemMiddleware since we have our own QC file tools
 subagent_middleware = [
     TodoListMiddleware(),
+    # ContextEditingMiddleware - prunes old tool outputs before summarization
+    # Triggers at 80k tokens, keeps last 3 tool results, replaces rest with [cleared]
+    ContextEditingMiddleware(edits=[
+        ClearToolUsesEdit(trigger=80000, keep=3, placeholder="[output cleared]"),
+    ]),
     SummarizationMiddleware(
         model="openai:gpt-5-mini",
         trigger=("tokens", 100000),
@@ -491,6 +498,12 @@ _inner_agent = create_agent(
             default_middleware=subagent_middleware,
             general_purpose_agent=True,
         ),
+        # ContextEditingMiddleware - prunes old tool outputs to save tokens
+        # Triggers at 80k tokens, keeps last 3 tool results, replaces rest with [cleared]
+        # Runs BEFORE summarization to reduce context size first
+        ContextEditingMiddleware(edits=[
+            ClearToolUsesEdit(trigger=80000, keep=3, placeholder="[output cleared]"),
+        ]),
         # SummarizationMiddleware - auto-summarizes when context gets long
         # Using gpt-5-mini instead of default Claude (which we don't have access to)
         SummarizationMiddleware(
