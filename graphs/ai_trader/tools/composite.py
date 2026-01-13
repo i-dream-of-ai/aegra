@@ -215,21 +215,110 @@ async def qc_compile_and_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Emit UI for backtest started
-        push_ui_message("backtest-stats", {
+        # Emit initial progress UI message
+        push_ui_message("backtest-progress", {
             "backtestId": backtest_id,
-            "name": backtest_name,
-            "status": "Running",
+            "backtestName": backtest_name,
+            "status": "running",
+            "progress": 0,
             "completed": False,
-            "summary": {},
-        }, message={"id": runtime.tool_call_id})
+            "equityCurve": [],
+        })
 
+        # Poll for status and stream equity curve updates
+        equity_curve = []
+        max_polls = 120  # Max 4 minutes of polling (120 * 2s)
+        poll_interval = 2  # Poll every 2 seconds
+
+        for poll_num in range(max_polls):
+            await asyncio.sleep(poll_interval)
+
+            status_result = await qc_request(
+                "/backtests/read",
+                {"projectId": qc_project_id, "backtestId": backtest_id},
+            )
+
+            status_backtest = status_result.get("backtest", {})
+            if isinstance(status_backtest, list):
+                status_backtest = status_backtest[0] if status_backtest else {}
+
+            # Check for errors
+            if isinstance(status_backtest, dict) and (
+                status_backtest.get("error") or status_backtest.get("hasInitializeError")
+            ):
+                error_msg = status_backtest.get("error", "Initialization error")
+                push_ui_message("backtest-progress", {
+                    "backtestId": backtest_id,
+                    "backtestName": backtest_name,
+                    "status": "error",
+                    "progress": 0,
+                    "completed": False,
+                    "error": error_msg,
+                    "equityCurve": equity_curve,
+                })
+                return format_error(error_msg, {"backtest_id": backtest_id})
+
+            # Extract progress and equity from runtime statistics
+            progress = status_backtest.get("progress", 0) if isinstance(status_backtest, dict) else 0
+            runtime_stats = status_backtest.get("runtimeStatistics", {}) if isinstance(status_backtest, dict) else {}
+
+            # Get current equity value
+            equity_str = runtime_stats.get("Equity", "0")
+            try:
+                equity_value = float(str(equity_str).replace(",", "").replace("$", ""))
+            except (ValueError, TypeError):
+                equity_value = 0
+
+            # Add equity point to curve
+            if equity_value > 0:
+                equity_curve.append({"x": poll_num, "y": equity_value})
+
+            # Check if completed
+            is_completed = status_backtest.get("completed", False) if isinstance(status_backtest, dict) else False
+
+            # Build statistics for completed backtest
+            statistics = None
+            if is_completed:
+                stats = status_backtest.get("statistics", {}) if isinstance(status_backtest, dict) else {}
+                statistics = {
+                    "totalReturn": stats.get("Net Profit"),
+                    "cagr": stats.get("Compounding Annual Return"),
+                    "sharpeRatio": stats.get("Sharpe Ratio"),
+                    "maxDrawdown": stats.get("Drawdown"),
+                    "winRate": stats.get("Win Rate"),
+                    "totalTrades": stats.get("Total Orders"),
+                }
+
+            # Emit progress update
+            push_ui_message("backtest-progress", {
+                "backtestId": backtest_id,
+                "backtestName": backtest_name,
+                "status": "completed" if is_completed else "running",
+                "progress": progress,
+                "completed": is_completed,
+                "equityCurve": equity_curve,
+                "statistics": statistics,
+            })
+
+            if is_completed:
+                return format_success(
+                    f"Backtest completed!",
+                    {
+                        "compile_id": compile_id,
+                        "backtest_id": backtest_id,
+                        "backtest_name": backtest_name,
+                        "status": "Completed",
+                    },
+                )
+
+        # Timeout - backtest still running after max polls
         return format_success(
-            f"Backtest created! Use read_backtest with ID: {backtest_id}",
+            f"Backtest still running. Use read_backtest to check status.",
             {
                 "compile_id": compile_id,
                 "backtest_id": backtest_id,
                 "backtest_name": backtest_name,
+                "status": "Running",
             },
         )
 
