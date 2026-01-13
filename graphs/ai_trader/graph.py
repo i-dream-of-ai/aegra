@@ -454,7 +454,7 @@ subagent_middleware = [
     TodoListMiddleware(),
     SummarizationMiddleware(
         model="openai:gpt-5-mini",
-        trigger=("fraction", 0.85),
+        trigger=("tokens", 170000),
         keep=("messages", 6),
     ),
     AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
@@ -495,7 +495,7 @@ _inner_agent = create_agent(
         # Using gpt-5-mini instead of default Claude (which we don't have access to)
         SummarizationMiddleware(
             model="openai:gpt-5-mini",
-            trigger=("fraction", 0.85),
+            trigger=("tokens", 170000),
             keep=("messages", 6),
         ),
         # AnthropicPromptCachingMiddleware - caches prompts for Claude models
