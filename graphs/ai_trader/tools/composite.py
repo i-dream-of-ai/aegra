@@ -397,7 +397,7 @@ async def qc_update_and_run_backtest(
 
         # Fetch final results for code version saving (just one poll, already completed)
         backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id, max_polls=1
+            qc_project_id, backtest_id, timeout=1
         )
 
         if backtest_error:
@@ -610,7 +610,7 @@ async def qc_edit_and_run_backtest(
 
         # Fetch final results for code version saving (just one poll, already completed)
         backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id, max_polls=1
+            qc_project_id, backtest_id, timeout=1
         )
 
         if backtest_error:
