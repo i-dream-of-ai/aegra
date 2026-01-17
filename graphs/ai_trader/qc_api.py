@@ -2,6 +2,7 @@
 QuantConnect API Client
 
 SHA256 timestamped authentication matching the TypeScript implementation.
+Supports both QuantConnect Cloud and self-hosted LEAN API.
 """
 
 import base64
@@ -12,7 +13,11 @@ from typing import Any
 
 import httpx
 
-QC_API_URL = "https://www.quantconnect.com/api/v2"
+# Check if we should use self-hosted LEAN
+USE_SELF_HOSTED = os.environ.get("USE_SELF_HOSTED_LEAN", "").lower() == "true"
+LEAN_API_URL = os.environ.get("LEAN_API_URL", "http://localhost:3001")
+
+QC_API_URL = f"{LEAN_API_URL}/api/v2" if USE_SELF_HOSTED else "https://www.quantconnect.com/api/v2"
 
 
 def get_qc_auth_headers() -> dict[str, str]:

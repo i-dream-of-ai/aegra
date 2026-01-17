@@ -12,6 +12,8 @@ services:
       - AUTH_TYPE=custom
       - DEBUG=true
       - PORT=${PORT:-8000}
+      - USE_SELF_HOSTED_LEAN=true
+      - LEAN_API_URL=http://lean-api:3001
     volumes:
       - ./aegra.json:/app/aegra.json:ro
       - ./graphs:/app/graphs:ro
@@ -27,16 +29,48 @@ services:
         uvicorn src.agent_server.main:app --host 0.0.0.0 --port $${PORT:-8000} --reload
       "
     restart: unless-stopped
+    depends_on:
+      lean-api:
+        condition: service_healthy
 
-  # Redis (optional - for advanced queuing in future phases)
+  # Self-hosted LEAN API (QC-compatible)
+  lean-api:
+    build:
+      context: ./packages/lean-api
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ENABLE_WORKERS=true
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis (required for LEAN job queue)
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    profiles:
-      - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
 volumes:
   redis_data:

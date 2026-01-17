@@ -23,14 +23,14 @@ jobs:
             git reset --hard origin/main
             git clean -fd -e .env
 
-            # Rebuild and restart the container
-            docker compose build --no-cache aegra
-            docker compose up -d aegra
+            # Rebuild and restart all services (aegra + lean-api + redis)
+            docker compose build --no-cache
+            docker compose up -d
 
-            # Verify container is running
-            sleep 5
-            docker compose ps aegra
+            # Verify containers are running
+            sleep 10
+            docker compose ps
 
             # Show recent logs
-            docker compose logs aegra --tail=20
+            docker compose logs --tail=30
 
