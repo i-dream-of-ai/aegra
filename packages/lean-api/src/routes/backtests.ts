@@ -29,14 +29,26 @@ import { getBacktestQueue } from '../workers/queue.js';
 const router: IRouter = Router();
 
 /**
- * Verify project ownership
+ * Look up project by QC project ID and verify ownership
+ * Uses the main 'projects' table which has qc_project_id
+ * Returns internal project id if found, null otherwise
  */
-async function verifyProjectAccess(projectId: number, userId: string): Promise<boolean> {
-  const project = await queryOne<LeanProject>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
-    [projectId, userId]
+async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
+  // First try: look up by qc_project_id in main projects table
+  const project = await queryOne<{ id: number }>(
+    'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
+    [String(qcProjectId), userId]
   );
-  return !!project;
+  if (project) {
+    return project.id;
+  }
+
+  // Fallback: maybe it's already an internal id in lean_projects
+  const leanProject = await queryOne<{ id: number }>(
+    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+    [qcProjectId, userId]
+  );
+  return leanProject?.id || null;
 }
 
 /**
@@ -176,8 +188,9 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         backtest: null,
@@ -195,7 +208,7 @@ router.post('/create', async (req, res) => {
        (backtest_id, project_id, user_id, name, status, start_date, end_date, cash)
        VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
        RETURNING *`,
-      [backtestId, projectId, userId, backtestName, startDate, endDate, cash]
+      [backtestId, internalProjectId, userId, backtestName, startDate, endDate, cash]
     );
 
     if (!backtest) {
@@ -206,7 +219,7 @@ router.post('/create', async (req, res) => {
     const queue = getBacktestQueue();
     await queue.add('backtest', {
       backtestId,
-      projectId,
+      projectId: internalProjectId,
       userId,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
@@ -253,8 +266,9 @@ router.post('/list', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         backtests: [],
@@ -264,7 +278,7 @@ router.post('/list', async (req, res) => {
 
     const backtests = await query<LeanBacktest>(
       'SELECT * FROM lean_backtests WHERE project_id = $1 ORDER BY created_at DESC',
-      [projectId]
+      [internalProjectId]
     );
 
     res.json({
@@ -309,8 +323,9 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         backtest: null,
@@ -320,7 +335,7 @@ router.post('/read', async (req, res) => {
 
     const backtest = await queryOne<LeanBacktest>(
       'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [projectId, backtestId]
+      [internalProjectId, backtestId]
     );
 
     if (!backtest) {
@@ -364,8 +379,9 @@ router.post('/delete', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         errors: ['Project not found or access denied'],
@@ -374,7 +390,7 @@ router.post('/delete', async (req, res) => {
 
     const deleted = await execute(
       'DELETE FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [projectId, backtestId]
+      [internalProjectId, backtestId]
     );
 
     if (deleted === 0) {
@@ -424,8 +440,9 @@ router.post('/chart/read', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         chart: {},
@@ -435,7 +452,7 @@ router.post('/chart/read', async (req, res) => {
 
     const backtest = await queryOne<LeanBacktest>(
       'SELECT rolling_window, status FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [projectId, backtestId]
+      [internalProjectId, backtestId]
     );
 
     if (!backtest) {

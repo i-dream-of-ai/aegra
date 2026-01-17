@@ -22,14 +22,26 @@ import { getOptimizationQueue } from '../workers/queue.js';
 const router: IRouter = Router();
 
 /**
- * Verify project ownership
+ * Look up project by QC project ID and verify ownership
+ * Uses the main 'projects' table which has qc_project_id
+ * Returns internal project id if found, null otherwise
  */
-async function verifyProjectAccess(projectId: number, userId: string): Promise<boolean> {
-  const project = await queryOne<LeanProject>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
-    [projectId, userId]
+async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
+  // First try: look up by qc_project_id in main projects table
+  const project = await queryOne<{ id: number }>(
+    'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
+    [String(qcProjectId), userId]
   );
-  return !!project;
+  if (project) {
+    return project.id;
+  }
+
+  // Fallback: maybe it's already an internal id in lean_projects
+  const leanProject = await queryOne<{ id: number }>(
+    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+    [qcProjectId, userId]
+  );
+  return leanProject?.id || null;
 }
 
 /**
@@ -111,8 +123,9 @@ router.post('/list', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         optimizations: [],
@@ -122,7 +135,7 @@ router.post('/list', async (req, res) => {
 
     const optimizations = await query<LeanOptimization>(
       'SELECT * FROM lean_optimizations WHERE project_id = $1 ORDER BY created_at DESC',
-      [projectId]
+      [internalProjectId]
     );
 
     res.json({
@@ -175,8 +188,9 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         optimization: null,
@@ -186,7 +200,7 @@ router.post('/read', async (req, res) => {
 
     const optimization = await queryOne<LeanOptimization>(
       'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
-      [projectId, optimizationId]
+      [internalProjectId, optimizationId]
     );
 
     if (!optimization) {
@@ -274,8 +288,9 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         optimization: null,
@@ -300,7 +315,7 @@ router.post('/create', async (req, res) => {
        (optimization_id, project_id, user_id, name, status, parameters, target, start_date, end_date, cash, total_backtests)
        VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [optimizationId, projectId, userId, name, JSON.stringify(parameters), target || 'SharpeRatio', startDate, endDate, cash, totalBacktests]
+      [optimizationId, internalProjectId, userId, name, JSON.stringify(parameters), target || 'SharpeRatio', startDate, endDate, cash, totalBacktests]
     );
 
     if (!optimization) {
@@ -311,7 +326,7 @@ router.post('/create', async (req, res) => {
     const queue = getOptimizationQueue();
     await queue.add('optimization', {
       optimizationId,
-      projectId,
+      projectId: internalProjectId,
       userId,
       parameters,
       target: target || 'SharpeRatio',
@@ -357,8 +372,9 @@ router.post('/delete', async (req, res) => {
       });
     }
 
-    const hasAccess = await verifyProjectAccess(projectId, userId);
-    if (!hasAccess) {
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
       return res.status(404).json({
         success: false,
         errors: ['Project not found or access denied'],
@@ -367,7 +383,7 @@ router.post('/delete', async (req, res) => {
 
     const deleted = await execute(
       'DELETE FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
-      [projectId, optimizationId]
+      [internalProjectId, optimizationId]
     );
 
     if (deleted === 0) {
