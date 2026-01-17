@@ -72,14 +72,25 @@ async function validateSupabaseToken(token: string): Promise<{ valid: boolean; u
 /**
  * Authentication middleware
  * Expects Bearer token with Supabase JWT
+ * Also supports internal service auth via X-Internal-Service header
  */
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
+  const internalServiceHeader = req.headers['x-internal-service'];
+  const internalUserId = req.headers['x-user-id'];
   const requestContext = {
     method: req.method,
     path: req.path,
     hasAuthHeader: !!authHeader,
   };
+
+  // Internal service-to-service auth (aegra -> lean-api on same Docker network)
+  const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+  if (internalServiceHeader && internalSecret && internalServiceHeader === internalSecret) {
+    // Use provided user ID or default to internal service user
+    req.userId = (internalUserId as string) || '__internal_service__';
+    return next();
+  }
 
   // Must have Authorization header
   if (!authHeader) {

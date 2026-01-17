@@ -20,19 +20,38 @@ LEAN_API_URL = os.environ.get("LEAN_API_URL", "http://localhost:3001")
 QC_API_URL = f"{LEAN_API_URL}/api/v2" if USE_SELF_HOSTED else "https://www.quantconnect.com/api/v2"
 
 
-def get_qc_auth_headers() -> dict[str, str]:
-    """Generate QuantConnect authentication headers with SHA256 timestamped token."""
-    user_id = os.environ.get("QUANTCONNECT_USER_ID")
+def get_qc_auth_headers(user_id_for_request: str | None = None) -> dict[str, str]:
+    """Generate authentication headers.
+
+    For self-hosted LEAN: Uses internal service auth.
+    For QuantConnect Cloud: Uses SHA256 timestamped token.
+
+    Args:
+        user_id_for_request: User ID to associate with the request (self-hosted only)
+    """
+    if USE_SELF_HOSTED:
+        # Internal service-to-service auth for self-hosted LEAN
+        internal_secret = os.environ.get("INTERNAL_SERVICE_SECRET", "")
+        headers = {
+            "X-Internal-Service": internal_secret,
+            "Content-Type": "application/json",
+        }
+        if user_id_for_request:
+            headers["X-User-Id"] = user_id_for_request
+        return headers
+
+    # QuantConnect Cloud auth
+    qc_user_id = os.environ.get("QUANTCONNECT_USER_ID")
     api_token = os.environ.get("QUANTCONNECT_TOKEN")
     org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
-    if not all([user_id, api_token, org_id]):
+    if not all([qc_user_id, api_token, org_id]):
         raise ValueError("Missing QuantConnect credentials")
 
     timestamp = int(time.time())
     timestamped_token = f"{api_token}:{timestamp}"
     hashed_token = hashlib.sha256(timestamped_token.encode()).hexdigest()
-    authentication = f"{user_id}:{hashed_token}"
+    authentication = f"{qc_user_id}:{hashed_token}"
     auth_header = f"Basic {base64.b64encode(authentication.encode()).decode()}"
 
     return {
