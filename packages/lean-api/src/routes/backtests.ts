@@ -486,4 +486,135 @@ router.post('/chart/read', async (req, res) => {
   }
 });
 
+/**
+ * GET /backtests/stream/:backtestId - Stream live backtest progress via SSE
+ *
+ * Streams progress updates until the backtest completes or errors.
+ * Includes equity curve data from rolling_window when available.
+ */
+router.get('/stream/:backtestId', async (req, res) => {
+  const { backtestId } = req.params;
+  const userId = req.userId;
+  const context = { endpoint: 'backtests/stream', userId, backtestId };
+
+  try {
+    // First verify the backtest exists and belongs to this user
+    const backtest = await queryOne<LeanBacktest>(
+      `SELECT lb.* FROM lean_backtests lb
+       JOIN projects p ON lb.project_id = p.id
+       WHERE lb.backtest_id = $1 AND p.user_id = $2`,
+      [backtestId, userId]
+    );
+
+    if (!backtest) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Backtest not found or access denied'],
+      });
+    }
+
+    // Set up SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // Disable nginx buffering
+    });
+
+    // Helper to send SSE event
+    const sendEvent = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Extract equity curve from rolling window
+    const extractEquityCurve = (rollingWindow: Record<string, unknown> | null): Array<{ x: number; y: number }> => {
+      if (!rollingWindow) return [];
+
+      // Look for "Equity" series in Strategy Equity chart
+      const equity = rollingWindow['Equity'] as { Values?: Array<{ x: number; y: number }> } | undefined;
+      if (equity?.Values) {
+        return equity.Values;
+      }
+
+      return [];
+    };
+
+    // Polling function to check backtest status
+    const pollBacktest = async () => {
+      const current = await queryOne<LeanBacktest>(
+        'SELECT * FROM lean_backtests WHERE backtest_id = $1',
+        [backtestId]
+      );
+
+      if (!current) {
+        sendEvent({ type: 'error', error: 'Backtest not found' });
+        return true; // Stop polling
+      }
+
+      const rollingWindow = current.rollingWindow as Record<string, unknown> | null;
+      const equityCurve = extractEquityCurve(rollingWindow);
+
+      // Build statistics from available data
+      const statistics = current.status === 'completed' ? {
+        totalReturn: current.netProfit ? `${current.netProfit.toFixed(2)}%` : undefined,
+        cagr: current.cagr ? `${(current.cagr * 100).toFixed(2)}%` : undefined,
+        sharpeRatio: current.sharpeRatio?.toFixed(3),
+        maxDrawdown: current.drawdown ? `${(current.drawdown * 100).toFixed(2)}%` : undefined,
+        winRate: current.winRate ? `${(current.winRate * 100).toFixed(0)}%` : undefined,
+        totalTrades: current.totalTrades?.toString(),
+      } : undefined;
+
+      sendEvent({
+        type: 'progress',
+        backtestId: current.backtestId,
+        backtestName: current.name,
+        status: current.status,
+        progress: (current.progress || 0) / 100, // Normalize to 0-1
+        completed: current.status === 'completed',
+        error: current.errorMessage || undefined,
+        equityCurve,
+        statistics,
+      });
+
+      // Stop polling if completed or errored
+      return current.status === 'completed' || current.status === 'error';
+    };
+
+    // Initial poll
+    const done = await pollBacktest();
+    if (done) {
+      res.end();
+      return;
+    }
+
+    // Set up polling interval (every 1 second)
+    const pollInterval = setInterval(async () => {
+      try {
+        const done = await pollBacktest();
+        if (done) {
+          clearInterval(pollInterval);
+          res.end();
+        }
+      } catch (error) {
+        console.error('[SSE] Poll error:', error);
+        sendEvent({ type: 'error', error: 'Failed to fetch progress' });
+        clearInterval(pollInterval);
+        res.end();
+      }
+    }, 1000);
+
+    // Clean up on client disconnect
+    req.on('close', () => {
+      clearInterval(pollInterval);
+    });
+
+  } catch (error) {
+    logError('backtests/stream', error, context);
+    res.status(500).json({
+      success: false,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
 export default router;

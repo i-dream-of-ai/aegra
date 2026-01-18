@@ -10,7 +10,7 @@ from langgraph.graph.ui import push_ui_message
 from ..context import Context
 from ..qc_api import qc_request
 from ..supabase_client import SupabaseClient
-from .utils import format_error, format_success, start_backtest_streaming
+from .utils import format_error, format_success
 
 
 def _format_error(message: str, details: dict | None = None) -> str:
@@ -170,6 +170,44 @@ async def _save_code_version(
         return None
 
 
+async def _confirm_backtest_started(
+    qc_project_id: int,
+    backtest_id: str,
+    max_polls: int = 5,
+    poll_interval: float = 3.0,
+) -> tuple[bool, str | None]:
+    """
+    Brief polling to confirm backtest started without immediate errors.
+    Default: 5 polls × 3 seconds = 15 seconds max wait.
+    Returns (success, error_message).
+    """
+    for _ in range(max_polls):
+        await asyncio.sleep(poll_interval)
+        try:
+            status = await qc_request(
+                "/backtests/read",
+                {"projectId": qc_project_id, "backtestId": backtest_id},
+            )
+            bt = status.get("backtest", {})
+            if isinstance(bt, list):
+                bt = bt[0] if bt else {}
+
+            # Check for initialization errors
+            if bt.get("error") or bt.get("hasInitializeError"):
+                return False, bt.get("error", "Initialization error")
+
+            # If we see progress > 0, it's running successfully
+            progress = bt.get("progress", 0)
+            if progress > 0:
+                return True, None
+
+        except Exception:
+            pass
+
+    # No error detected within timeout - assume it's running
+    return True, None
+
+
 @tool
 async def qc_compile_and_backtest(
     backtest_name: str,
@@ -177,12 +215,14 @@ async def qc_compile_and_backtest(
 ) -> str:
     """
     Compile code and create a backtest using default parameter values.
+    Returns after confirming backtest started - UI streams progress independently.
 
     Args:
         backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -215,17 +255,32 @@ async def qc_compile_and_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Stream backtest progress with live equity curve updates
-        # This blocks until backtest completes but streams UI updates
-        await start_backtest_streaming(
-            qc_project_id=qc_project_id,
-            backtest_id=backtest_id,
-            backtest_name=backtest_name,
-            qc_request=qc_request,
+        # Emit UI message to trigger frontend SSE streaming
+        push_ui_message(
+            "backtest-started",
+            {
+                "backtestId": backtest_id,
+                "backtestName": backtest_name,
+                "projectId": project_id,
+                "qcProjectId": qc_project_id,
+                "status": "queued",
+            },
+            message={"id": runtime.tool_call_id},
         )
 
+        # Brief polling to confirm backtest started without errors (~10 seconds)
+        started_ok, error_msg = await _confirm_backtest_started(
+            qc_project_id, backtest_id
+        )
+
+        if not started_ok:
+            return format_error(
+                f"Backtest failed to start: {error_msg}",
+                {"compile_id": compile_id, "backtest_id": backtest_id},
+            )
+
         return format_success(
-            f"Backtest completed successfully.",
+            f"Backtest '{backtest_name}' is running. Live progress is streaming in the UI.",
             {
                 "compile_id": compile_id,
                 "backtest_id": backtest_id,
@@ -337,6 +392,7 @@ async def qc_update_and_run_backtest(
 ) -> str:
     """
     Update file with COMPLETE new content, compile, and run backtest.
+    Returns after confirming backtest started - UI streams progress independently.
 
     Args:
         file_name: Name of the file to update (e.g., "main.py")
@@ -345,7 +401,7 @@ async def qc_update_and_run_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
-        project_db_id = runtime.context.get("project_db_id")
+        project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -386,91 +442,47 @@ async def qc_update_and_run_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Stream backtest progress with live equity curve updates
-        # This blocks until backtest completes but streams UI updates
-        await start_backtest_streaming(
-            qc_project_id=qc_project_id,
-            backtest_id=backtest_id,
-            backtest_name=backtest_name,
-            qc_request=qc_request,
-        )
-
-        # Fetch final results for code version saving (just one poll, already completed)
-        backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id, timeout=1
-        )
-
-        if backtest_error:
-            return json.dumps(
-                {"success": False, "backtest_id": backtest_id, "error": backtest_error}
-            )
-
-        if backtest_result:
-            stats = backtest_result.get("statistics", {})
-
-            # Save code version to database
-            saved_version = await _save_code_version(
-                backtest_name=backtest_name,
-                backtest_id=backtest_id,
-                compile_id=compile_id,
-                code=file_content,
-                stats=stats,
-                qc_project_id=qc_project_id,
-                project_db_id=project_db_id,
-                status="completed",
-            )
-
-            # Parse total orders as integer
-            total_orders_raw = stats.get("Total Orders")
-            total_orders = None
-            if total_orders_raw is not None:
-                try:
-                    total_orders = int(float(str(total_orders_raw).replace(",", "")))
-                except (ValueError, TypeError):
-                    total_orders = None
-
-            # Emit custom UI for backtest stats
-            push_ui_message("backtest-stats", {
+        # Emit UI message to trigger frontend SSE streaming
+        push_ui_message(
+            "backtest-started",
+            {
                 "backtestId": backtest_id,
-                "name": backtest_name,
-                "status": "Completed",
-                "completed": True,
-                "summary": {
-                    "totalReturn": stats.get("Net Profit"),
-                    "annualReturn": stats.get("Compounding Annual Return"),
-                    "sharpeRatio": stats.get("Sharpe Ratio"),
-                    "drawdown": stats.get("Drawdown"),
-                    "totalTrades": total_orders,
-                    "winRate": stats.get("Win Rate"),
-                    "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
-                    "averageWin": stats.get("Average Win"),
-                    "averageLoss": stats.get("Average Loss"),
-                },
-            }, message={"id": runtime.tool_call_id})
+                "backtestName": backtest_name,
+                "projectId": project_id,
+                "qcProjectId": qc_project_id,
+                "compileId": compile_id,
+                "fileUpdated": file_name,
+                "status": "queued",
+            },
+            message={"id": runtime.tool_call_id},
+        )
 
+        # Brief polling to confirm backtest started without errors (~10 seconds)
+        started_ok, error_msg = await _confirm_backtest_started(
+            qc_project_id, backtest_id
+        )
+
+        if not started_ok:
             return json.dumps(
                 {
-                    "success": True,
-                    "file_updated": file_name,
+                    "success": False,
+                    "compile_id": compile_id,
                     "backtest_id": backtest_id,
-                    "completed": True,
-                    "code_version_id": saved_version.get("id")
-                    if saved_version
-                    else None,
-                    "statistics": {
-                        "net_profit": stats.get("Net Profit", "N/A"),
-                        "cagr": stats.get("Compounding Annual Return", "N/A"),
-                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                        "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "total_orders": stats.get("Total Orders", "N/A"),
-                        "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
-                    },
-                },
-                indent=2,
+                    "error": f"Backtest failed to start: {error_msg}",
+                }
             )
 
         return json.dumps(
-            {"success": True, "backtest_id": backtest_id, "status": "Running"}
+            {
+                "success": True,
+                "file_updated": file_name,
+                "compile_id": compile_id,
+                "backtest_id": backtest_id,
+                "backtest_name": backtest_name,
+                "status": "Running",
+                "message": f"Backtest '{backtest_name}' is running. Live progress is streaming in the UI.",
+            },
+            indent=2,
         )
 
     except Exception as e:
@@ -486,6 +498,7 @@ async def qc_edit_and_run_backtest(
 ) -> str:
     """
     Edit file using search-and-replace, then compile and run backtest.
+    Returns after confirming backtest started - UI streams progress independently.
 
     Args:
         file_name: Name of the file to edit
@@ -494,7 +507,7 @@ async def qc_edit_and_run_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
-        project_db_id = runtime.context.get("project_db_id")
+        project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -599,92 +612,49 @@ async def qc_edit_and_run_backtest(
             backtest = backtest[0] if backtest else {}
         backtest_id = backtest.get("backtestId")
 
-        # Stream backtest progress with live equity curve updates
-        # This blocks until backtest completes but streams UI updates
-        await start_backtest_streaming(
-            qc_project_id=qc_project_id,
-            backtest_id=backtest_id,
-            backtest_name=backtest_name,
-            qc_request=qc_request,
-        )
-
-        # Fetch final results for code version saving (just one poll, already completed)
-        backtest_result, backtest_error = await _poll_backtest(
-            qc_project_id, backtest_id, timeout=1
-        )
-
-        if backtest_error:
-            return json.dumps(
-                {"success": False, "backtest_id": backtest_id, "error": backtest_error}
-            )
-
-        if backtest_result:
-            stats = backtest_result.get("statistics", {})
-
-            # Save code version to database
-            saved_version = await _save_code_version(
-                backtest_name=backtest_name,
-                backtest_id=backtest_id,
-                compile_id=compile_id,
-                code=updated_content,
-                stats=stats,
-                qc_project_id=qc_project_id,
-                project_db_id=project_db_id,
-                status="completed",
-            )
-
-            # Parse total orders as integer
-            total_orders_raw = stats.get("Total Orders")
-            total_orders = None
-            if total_orders_raw is not None:
-                try:
-                    total_orders = int(float(str(total_orders_raw).replace(",", "")))
-                except (ValueError, TypeError):
-                    total_orders = None
-
-            # Emit custom UI component for backtest stats
-            push_ui_message("backtest-stats", {
+        # Emit UI message to trigger frontend SSE streaming
+        push_ui_message(
+            "backtest-started",
+            {
                 "backtestId": backtest_id,
-                "name": backtest_name,
-                "status": "Completed",
-                "completed": True,
-                "summary": {
-                    "totalReturn": stats.get("Net Profit"),
-                    "annualReturn": stats.get("Compounding Annual Return"),
-                    "sharpeRatio": stats.get("Sharpe Ratio"),
-                    "drawdown": stats.get("Drawdown"),
-                    "totalTrades": total_orders,
-                    "winRate": stats.get("Win Rate"),
-                    "profitFactor": stats.get("Profit-Loss Ratio", stats.get("Expectancy")),
-                    "averageWin": stats.get("Average Win"),
-                    "averageLoss": stats.get("Average Loss"),
-                },
-            }, message={"id": runtime.tool_call_id})
+                "backtestName": backtest_name,
+                "projectId": project_id,
+                "qcProjectId": qc_project_id,
+                "compileId": compile_id,
+                "fileUpdated": file_name,
+                "editsApplied": len(edits),
+                "status": "queued",
+            },
+            message={"id": runtime.tool_call_id},
+        )
 
+        # Brief polling to confirm backtest started without errors (~15 seconds)
+        started_ok, error_msg = await _confirm_backtest_started(
+            qc_project_id, backtest_id
+        )
+
+        if not started_ok:
             return json.dumps(
                 {
-                    "success": True,
-                    "file_updated": file_name,
-                    "edits_applied": len(edits),
+                    "success": False,
+                    "compile_id": compile_id,
                     "backtest_id": backtest_id,
-                    "completed": True,
-                    "code_version_id": saved_version.get("id")
-                    if saved_version
-                    else None,
-                    "statistics": {
-                        "net_profit": stats.get("Net Profit", "N/A"),
-                        "cagr": stats.get("Compounding Annual Return", "N/A"),
-                        "sharpe_ratio": stats.get("Sharpe Ratio", "N/A"),
-                        "max_drawdown": stats.get("Drawdown", "N/A"),
-                        "total_orders": stats.get("Total Orders", "N/A"),
-                        "profit_factor": stats.get("Profit-Loss Ratio", stats.get("Expectancy", "N/A")),
-                    },
-                },
-                indent=2,
+                    "error": f"Backtest failed to start: {error_msg}",
+                }
             )
 
         return json.dumps(
-            {"success": True, "backtest_id": backtest_id, "status": "Running"}
+            {
+                "success": True,
+                "file_updated": file_name,
+                "edits_applied": len(edits),
+                "compile_id": compile_id,
+                "backtest_id": backtest_id,
+                "backtest_name": backtest_name,
+                "status": "Running",
+                "message": f"Backtest '{backtest_name}' is running. Live progress is streaming in the UI.",
+            },
+            indent=2,
         )
 
     except Exception as e:

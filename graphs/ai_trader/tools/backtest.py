@@ -10,8 +10,6 @@ from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
-from .utils import start_backtest_streaming
-
 
 
 @tool
@@ -21,8 +19,9 @@ async def create_backtest(
     runtime: ToolRuntime[Context],
 ) -> str:
     """
-    Create a backtest on QuantConnect using default parameter values.
-    Streams live equity curve updates to the frontend during execution.
+    Create and queue a backtest on QuantConnect.
+    Polls briefly to confirm it started without errors, then returns.
+    The UI handles live progress streaming independently.
 
     Args:
         compile_id: The QuantConnect compile ID
@@ -30,6 +29,7 @@ async def create_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        project_id = runtime.context.get("project_id")  # Internal project ID for UI
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -54,20 +54,55 @@ async def create_backtest(
         if not backtest_id:
             return json.dumps({"error": True, "message": "No backtest ID returned."})
 
-        # Start non-blocking background streaming of backtest progress with live equity curve
-        start_backtest_streaming(
-            qc_project_id=qc_project_id,
-            backtest_id=backtest_id,
-            backtest_name=backtest_name,
-            qc_request=qc_request,
+        # Emit UI message to trigger frontend SSE streaming
+        # The UI will independently connect to the backtest stream endpoint
+        push_ui_message(
+            "backtest-started",
+            {
+                "backtestId": backtest_id,
+                "backtestName": backtest_name,
+                "projectId": project_id,
+                "qcProjectId": qc_project_id,
+                "status": "queued",
+            },
+            message={"id": runtime.tool_call_id},
         )
+
+        # Brief polling to confirm backtest started without immediate errors
+        # Check 5 times over ~15 seconds to catch initialization errors
+        for _ in range(5):
+            await asyncio.sleep(3)
+
+            status_result = await qc_request(
+                "/backtests/read",
+                {"projectId": qc_project_id, "backtestId": backtest_id},
+            )
+
+            status_backtest = status_result.get("backtest", {})
+            if isinstance(status_backtest, list):
+                status_backtest = status_backtest[0] if status_backtest else {}
+
+            # Check for initialization errors
+            if isinstance(status_backtest, dict):
+                if status_backtest.get("error") or status_backtest.get("hasInitializeError"):
+                    error_msg = status_backtest.get("error", "Initialization error")
+                    return json.dumps({
+                        "error": True,
+                        "backtest_id": backtest_id,
+                        "message": f"Backtest failed to start: {error_msg}",
+                    })
+
+                # If we see progress > 0, it's running successfully
+                progress = status_backtest.get("progress", 0)
+                if progress > 0:
+                    break
 
         return json.dumps({
             "success": True,
             "backtest_id": backtest_id,
             "backtest_name": backtest_name,
-            "status": "Started",
-            "message": f"Backtest started! Live progress streaming in background.",
+            "status": "Running",
+            "message": f"Backtest '{backtest_name}' is running. Live progress is streaming in the UI.",
         })
 
     except Exception as e:

@@ -1,10 +1,12 @@
 /**
  * Files Routes - QC API Compatible
- * POST /api/v2/files/read
- * POST /api/v2/files/update
+ * POST /api/v2/files/create - Create a new file
+ * POST /api/v2/files/read - List files or read specific file
+ * POST /api/v2/files/update - Update file name or content
+ * POST /api/v2/files/delete - Delete a file
  */
 
-import { Router, type IRouter } from 'express';
+import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../services/database.js';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
 import type {
@@ -15,7 +17,36 @@ import type {
 } from '../types/index.js';
 import type { LeanFile, LeanProject } from '../types/index.js';
 
-const router: IRouter = Router();
+/**
+ * Request types matching QC API exactly
+ */
+interface FilesCreateRequest {
+  projectId: number;
+  name: string;
+  content?: string;
+  codeSourceId?: string;
+}
+
+interface FilesDeleteRequest {
+  projectId: number;
+  name: string;
+}
+
+interface FilesUpdateNameRequest {
+  projectId: number;
+  name: string;
+  newName: string;
+  codeSourceId?: string;
+}
+
+interface FilesUpdateContentRequest {
+  projectId: number;
+  name: string;
+  content: string;
+  codeSourceId?: string;
+}
+
+const router = Router();
 
 /**
  * Convert internal file to QC format
@@ -57,13 +88,130 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
 }
 
 /**
- * POST /files/read - List files or get specific file
+ * POST /files/create - Create a new file
+ * QC API: POST /api/v2/files/create
+ * Request: { projectId: number, name: string, content?: string, codeSourceId?: string }
+ * Response: { success: boolean, errors: string[], files: ProjectFile[] }
  */
-router.post('/read', async (req, res) => {
+router.post('/create', async (req: Request, res: Response) => {
+  const context = { endpoint: 'files/create', userId: req.userId, body: { ...req.body, content: req.body?.content?.length + ' chars' } };
+
+  try {
+    const { projectId, name, content } = req.body as FilesCreateRequest;
+    const userId = req.userId;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['projectId is required'],
+      });
+    }
+
+    if (typeof projectId !== 'number' || projectId < 1) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['projectId must be a positive integer'],
+      });
+    }
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['name is required'],
+      });
+    }
+
+    if (typeof name !== 'string' || name.length > 255) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['name must be a string of 255 characters or less'],
+      });
+    }
+
+    // Validate filename - alphanumeric, underscores, hyphens, dots, and forward slashes (for paths)
+    if (!/^[a-zA-Z0-9_\-\.\/]+$/.test(name)) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['Invalid filename. Use only alphanumeric characters, underscores, hyphens, dots, and forward slashes.'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        files: [],
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    // Check if file already exists
+    const existing = await queryOne<LeanFile>(
+      'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+      [internalProjectId, name]
+    );
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['File already exists. Use /files/update to modify existing files.'],
+      });
+    }
+
+    const isMain = name.toLowerCase() === 'main.py';
+    const fileContent = content || '';
+
+    const file = await queryOne<LeanFile>(
+      `INSERT INTO lean_files (project_id, name, content, is_main)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [internalProjectId, name, fileContent, isMain]
+    );
+
+    // Update timestamp on main projects table
+    await execute(
+      'UPDATE projects SET updated_at = NOW() WHERE id = $1',
+      [internalProjectId]
+    );
+
+    const response: QCFilesResponse = {
+      success: true,
+      files: file ? [toQCFile(file)] : [],
+      errors: [],
+    };
+
+    res.json(response);
+  } catch (error) {
+    logError('files/create', error, context);
+    const statusCode = getErrorStatusCode(error);
+    const response: QCFilesResponse = {
+      success: false,
+      files: [],
+      errors: [formatErrorForResponse(error)],
+    };
+    res.status(statusCode).json(response);
+  }
+});
+
+/**
+ * POST /files/read - List files or get specific file
+ * QC API: POST /api/v2/files/read
+ * Request: { projectId: number, name?: string, codeSourceId?: string }
+ * Response: { success: boolean, errors: string[], files: ProjectFile[] }
+ */
+router.post('/read', async (req: Request, res: Response) => {
   const context = { endpoint: 'files/read', userId: req.userId, body: req.body };
 
   try {
-    const { projectId, fileName } = req.body as FilesReadRequest;
+    // QC API uses 'name' not 'fileName'
+    const { projectId, name } = req.body as { projectId: number; name?: string; codeSourceId?: string };
     const userId = req.userId;
 
     if (!projectId) {
@@ -97,10 +245,10 @@ router.post('/read', async (req, res) => {
 
     let files: LeanFile[];
 
-    if (fileName) {
+    if (name) {
       const file = await queryOne<LeanFile>(
         'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
-        [internalProjectId, fileName]
+        [internalProjectId, name]
       );
       files = file ? [file] : [];
     } else {
@@ -130,20 +278,46 @@ router.post('/read', async (req, res) => {
 });
 
 /**
- * POST /files/update - Create or update a file
+ * POST /files/update - Update file name or content
+ * QC API: POST /api/v2/files/update
+ *
+ * Two modes:
+ * 1. Rename: { projectId, name, newName } - Rename a file
+ * 2. Content: { projectId, name, content } - Update file content
+ *
+ * Response: { success: boolean, errors: string[], files: ProjectFile[] }
  */
-router.post('/update', async (req, res) => {
-  const context = { endpoint: 'files/update', userId: req.userId, body: { ...req.body, content: req.body?.content?.length + ' chars' } };
+router.post('/update', async (req: Request, res: Response) => {
+  const context = {
+    endpoint: 'files/update',
+    userId: req.userId,
+    body: { ...req.body, content: req.body?.content ? req.body.content.length + ' chars' : undefined }
+  };
 
   try {
-    const { projectId, name, content } = req.body as FilesUpdateRequest;
+    const { projectId, name, newName, content } = req.body as {
+      projectId: number;
+      name: string;
+      newName?: string;
+      content?: string;
+      codeSourceId?: string;
+    };
     const userId = req.userId;
 
+    // Validate required fields
     if (!projectId) {
       return res.status(400).json({
         success: false,
         files: [],
         errors: ['projectId is required'],
+      });
+    }
+
+    if (typeof projectId !== 'number' || projectId < 1) {
+      return res.status(400).json({
+        success: false,
+        files: [],
+        errors: ['projectId must be a positive integer'],
       });
     }
 
@@ -155,11 +329,12 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    if (content === undefined || content === null) {
+    // Must have either newName OR content (not neither, can have both)
+    if (newName === undefined && content === undefined) {
       return res.status(400).json({
         success: false,
         files: [],
-        errors: ['content is required'],
+        errors: ['Either newName or content must be provided'],
       });
     }
 
@@ -171,13 +346,23 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    // Validate filename
-    if (!/^[a-zA-Z0-9_\-\.]+$/.test(name)) {
-      return res.status(400).json({
-        success: false,
-        files: [],
-        errors: ['Invalid filename. Use only alphanumeric characters, underscores, hyphens, and dots.'],
-      });
+    // Validate newName if provided
+    if (newName !== undefined) {
+      if (typeof newName !== 'string' || newName.length > 255) {
+        return res.status(400).json({
+          success: false,
+          files: [],
+          errors: ['newName must be a string of 255 characters or less'],
+        });
+      }
+      // Allow forward slashes for paths
+      if (!/^[a-zA-Z0-9_\-\.\/]+$/.test(newName)) {
+        return res.status(400).json({
+          success: false,
+          files: [],
+          errors: ['Invalid newName. Use only alphanumeric characters, underscores, hyphens, dots, and forward slashes.'],
+        });
+      }
     }
 
     // Look up internal project id from QC project id
@@ -190,17 +375,60 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    const isMain = name.toLowerCase() === 'main.py';
-
-    const file = await queryOne<LeanFile>(
-      `INSERT INTO lean_files (project_id, name, content, is_main)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (project_id, name) DO UPDATE SET
-         content = EXCLUDED.content,
-         modified_at = NOW()
-       RETURNING *`,
-      [internalProjectId, name, content, isMain]
+    // Check if file exists
+    const existingFile = await queryOne<LeanFile>(
+      'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+      [internalProjectId, name]
     );
+
+    if (!existingFile) {
+      return res.status(404).json({
+        success: false,
+        files: [],
+        errors: ['File not found'],
+      });
+    }
+
+    let file: LeanFile | null = null;
+
+    // Handle rename operation
+    if (newName !== undefined && newName !== name) {
+      // Check if target name already exists
+      const targetExists = await queryOne<LeanFile>(
+        'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+        [internalProjectId, newName]
+      );
+
+      if (targetExists) {
+        return res.status(400).json({
+          success: false,
+          files: [],
+          errors: ['A file with that name already exists'],
+        });
+      }
+
+      const isMain = newName.toLowerCase() === 'main.py';
+
+      // Update with new name and optionally new content
+      file = await queryOne<LeanFile>(
+        `UPDATE lean_files
+         SET name = $1, is_main = $2, modified_at = NOW()${content !== undefined ? ', content = $4' : ''}
+         WHERE project_id = $3 AND name = $5
+         RETURNING *`,
+        content !== undefined
+          ? [newName, isMain, internalProjectId, content, name]
+          : [newName, isMain, internalProjectId, name]
+      );
+    } else if (content !== undefined) {
+      // Content-only update
+      file = await queryOne<LeanFile>(
+        `UPDATE lean_files
+         SET content = $1, modified_at = NOW()
+         WHERE project_id = $2 AND name = $3
+         RETURNING *`,
+        [content, internalProjectId, name]
+      );
+    }
 
     // Update timestamp on main projects table
     await execute(
@@ -229,12 +457,15 @@ router.post('/update', async (req, res) => {
 
 /**
  * POST /files/delete - Delete a file
+ * QC API: POST /api/v2/files/delete
+ * Request: { projectId: number, name: string }
+ * Response: { success: boolean, errors: string[] }
  */
-router.post('/delete', async (req, res) => {
+router.post('/delete', async (req: Request, res: Response) => {
   const context = { endpoint: 'files/delete', userId: req.userId, body: req.body };
 
   try {
-    const { projectId, name } = req.body as { projectId: number; name: string };
+    const { projectId, name } = req.body as FilesDeleteRequest;
     const userId = req.userId;
 
     if (!projectId || !name) {

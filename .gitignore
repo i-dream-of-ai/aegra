@@ -30,3 +30,4 @@ htmlcov/
 
 # Pre-commit
 .pre-commit-cache/
+node_modules/
