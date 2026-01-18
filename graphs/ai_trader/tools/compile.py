@@ -18,6 +18,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -25,6 +26,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
         result = await qc_request(
             "/compile/create",
             {"projectId": qc_project_id},
+            user_id=user_id,
         )
 
         compile_id = result.get("compileId")
@@ -46,6 +48,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
             status = await qc_request(
                 "/compile/read",
                 {"projectId": qc_project_id, "compileId": compile_id},
+                user_id=user_id,
             )
             state = status.get("state", "Unknown")
 
@@ -121,6 +124,7 @@ async def read_compile(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -128,6 +132,7 @@ async def read_compile(
         result = await qc_request(
             "/compile/read",
             {"projectId": qc_project_id, "compileId": compile_id},
+            user_id=user_id,
         )
 
         state = result.get("state", "Unknown")

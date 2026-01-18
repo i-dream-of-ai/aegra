@@ -24,6 +24,7 @@ async def qc_create_file(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -35,6 +36,7 @@ async def qc_create_file(
                 "name": file_name,
                 "content": content,
             },
+            user_id=user_id,
         )
 
         # Emit file-operation UI
@@ -71,6 +73,7 @@ async def qc_read_file(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -78,6 +81,7 @@ async def qc_read_file(
         result = await qc_request(
             "/files/read",
             {"projectId": qc_project_id, "name": file_name},
+            user_id=user_id,
         )
 
         files = result.get("files", [])
@@ -155,6 +159,7 @@ async def qc_update_file(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -166,6 +171,7 @@ async def qc_update_file(
                 "name": file_name,
                 "content": content,
             },
+            user_id=user_id,
         )
 
         # Emit file-operation UI
@@ -204,6 +210,7 @@ async def qc_rename_file(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -220,6 +227,7 @@ async def qc_rename_file(
                 "name": old_file_name,
                 "newName": new_file_name,
             },
+            user_id=user_id,
         )
 
         # Emit file-operation UI
@@ -263,6 +271,7 @@ async def qc_delete_file(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -270,6 +279,7 @@ async def qc_delete_file(
         await qc_request(
             "/files/delete",
             {"projectId": qc_project_id, "name": file_name},
+            user_id=user_id,
         )
 
         # Emit file-operation UI

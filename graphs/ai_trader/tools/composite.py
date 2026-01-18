@@ -30,7 +30,7 @@ def _format_success(message: str, data: dict | None = None) -> str:
 
 
 async def _poll_compile(
-    qc_project_id: int, compile_id: str, timeout: int = 30
+    qc_project_id: int, compile_id: str, timeout: int = 30, user_id: str | None = None
 ) -> tuple[bool, str | None]:
     """Poll for compile completion."""
     for _ in range(timeout):
@@ -39,6 +39,7 @@ async def _poll_compile(
             status = await qc_request(
                 "/compile/read",
                 {"projectId": qc_project_id, "compileId": compile_id},
+                user_id=user_id,
             )
             if status.get("state") == "BuildSuccess":
                 return True, None
@@ -52,7 +53,7 @@ async def _poll_compile(
 
 
 async def _poll_backtest(
-    qc_project_id: int, backtest_id: str, timeout: int = 60
+    qc_project_id: int, backtest_id: str, timeout: int = 60, user_id: str | None = None
 ) -> tuple[dict | None, str | None]:
     """Poll for backtest completion."""
     for _ in range(timeout):
@@ -61,6 +62,7 @@ async def _poll_backtest(
             status = await qc_request(
                 "/backtests/read",
                 {"projectId": qc_project_id, "backtestId": backtest_id},
+                user_id=user_id,
             )
             bt = status.get("backtest", {})
             if isinstance(bt, list):
@@ -175,6 +177,7 @@ async def _confirm_backtest_started(
     backtest_id: str,
     max_polls: int = 5,
     poll_interval: float = 3.0,
+    user_id: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Brief polling to confirm backtest started without immediate errors.
@@ -187,6 +190,7 @@ async def _confirm_backtest_started(
             status = await qc_request(
                 "/backtests/read",
                 {"projectId": qc_project_id, "backtestId": backtest_id},
+                user_id=user_id,
             )
             bt = status.get("backtest", {})
             if isinstance(bt, list):
@@ -222,6 +226,7 @@ async def qc_compile_and_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
@@ -229,12 +234,12 @@ async def qc_compile_and_backtest(
             return _format_error("No project context.")
 
         # Compile
-        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
+        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id}, user_id=user_id)
         compile_id = compile_data.get("compileId")
         if not compile_id:
             return format_error("No compile ID returned.")
 
-        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
+        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id, user_id=user_id)
         if not is_compiled:
             return format_error(
                 f"Compilation failed: {compile_error}", {"compile_id": compile_id}
@@ -249,6 +254,7 @@ async def qc_compile_and_backtest(
                 "compileId": compile_id,
                 "backtestName": backtest_name,
             },
+            user_id=user_id,
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
@@ -270,7 +276,7 @@ async def qc_compile_and_backtest(
 
         # Brief polling to confirm backtest started without errors (~10 seconds)
         started_ok, error_msg = await _confirm_backtest_started(
-            qc_project_id, backtest_id
+            qc_project_id, backtest_id, user_id=user_id
         )
 
         if not started_ok:
@@ -317,6 +323,7 @@ async def qc_compile_and_optimize(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -326,10 +333,10 @@ async def qc_compile_and_optimize(
             return format_error("QC limits optimizations to 3 parameters max.")
 
         # Compile
-        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
+        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id}, user_id=user_id)
         compile_id = compile_data.get("compileId")
 
-        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
+        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id, user_id=user_id)
         if not is_compiled:
             return json.dumps(
                 {
@@ -356,6 +363,7 @@ async def qc_compile_and_optimize(
                 "nodeType": node_type,
                 "parallelNodes": parallel_nodes,
             },
+            user_id=user_id,
         )
 
         opt_id = result.get("optimizations", [{}])[0].get(
@@ -401,6 +409,7 @@ async def qc_update_and_run_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
@@ -411,13 +420,14 @@ async def qc_update_and_run_backtest(
         await qc_request(
             "/files/update",
             {"projectId": qc_project_id, "name": file_name, "content": file_content},
+            user_id=user_id,
         )
 
         # Compile
-        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
+        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id}, user_id=user_id)
         compile_id = compile_data.get("compileId")
 
-        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
+        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id, user_id=user_id)
         if not is_compiled:
             return json.dumps(
                 {
@@ -436,6 +446,7 @@ async def qc_update_and_run_backtest(
                 "compileId": compile_id,
                 "backtestName": backtest_name,
             },
+            user_id=user_id,
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
@@ -459,7 +470,7 @@ async def qc_update_and_run_backtest(
 
         # Brief polling to confirm backtest started without errors (~10 seconds)
         started_ok, error_msg = await _confirm_backtest_started(
-            qc_project_id, backtest_id
+            qc_project_id, backtest_id, user_id=user_id
         )
 
         if not started_ok:
@@ -507,6 +518,7 @@ async def qc_edit_and_run_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         project_id = runtime.context.get("project_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
@@ -515,7 +527,7 @@ async def qc_edit_and_run_backtest(
 
         # Read current file
         files_data = await qc_request(
-            "/files/read", {"projectId": qc_project_id, "name": file_name}
+            "/files/read", {"projectId": qc_project_id, "name": file_name}, user_id=user_id
         )
         files = files_data.get("files", [])
         if not files:
@@ -585,13 +597,14 @@ async def qc_edit_and_run_backtest(
         await qc_request(
             "/files/update",
             {"projectId": qc_project_id, "name": file_name, "content": updated_content},
+            user_id=user_id,
         )
 
         # Compile
-        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id})
+        compile_data = await qc_request("/compile/create", {"projectId": qc_project_id}, user_id=user_id)
         compile_id = compile_data.get("compileId")
 
-        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id)
+        is_compiled, compile_error = await _poll_compile(qc_project_id, compile_id, user_id=user_id)
         if not is_compiled:
             return json.dumps(
                 {"success": False, "error": f"Compilation failed: {compile_error}"}
@@ -606,6 +619,7 @@ async def qc_edit_and_run_backtest(
                 "compileId": compile_id,
                 "backtestName": backtest_name,
             },
+            user_id=user_id,
         )
         backtest = backtest_data.get("backtest", {})
         if isinstance(backtest, list):
@@ -630,7 +644,7 @@ async def qc_edit_and_run_backtest(
 
         # Brief polling to confirm backtest started without errors (~15 seconds)
         started_ok, error_msg = await _confirm_backtest_started(
-            qc_project_id, backtest_id
+            qc_project_id, backtest_id, user_id=user_id
         )
 
         if not started_ok:

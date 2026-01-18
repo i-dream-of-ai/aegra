@@ -65,9 +65,17 @@ async def qc_request(
     endpoint: str,
     payload: dict[str, Any] | None = None,
     method: str = "POST",
+    user_id: str | None = None,
 ) -> Any:
-    """Make authenticated request to QuantConnect API."""
-    headers = get_qc_auth_headers()
+    """Make authenticated request to QuantConnect API.
+
+    Args:
+        endpoint: API endpoint path (e.g., "/files/read")
+        payload: Request body as dict
+        method: HTTP method (default POST)
+        user_id: User ID for ownership verification (required for self-hosted LEAN)
+    """
+    headers = get_qc_auth_headers(user_id)
     url = f"{QC_API_URL}{endpoint}"
 
     async with httpx.AsyncClient(timeout=60.0) as client:

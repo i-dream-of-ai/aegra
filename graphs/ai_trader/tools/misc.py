@@ -189,10 +189,11 @@ async def read_project_nodes(runtime: ToolRuntime[Context]) -> str:
     """Read available and active nodes for the current QuantConnect project."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        result = await qc_request("/projects/nodes/read", {"projectId": qc_project_id})
+        result = await qc_request("/projects/nodes/read", {"projectId": qc_project_id}, user_id=user_id)
         
         nodes = result.get("nodes", [])
         push_ui_message("project-nodes", {
@@ -221,11 +222,12 @@ async def update_project_nodes(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
         await qc_request(
-            "/projects/nodes/update", {"projectId": qc_project_id, "nodes": nodes}
+            "/projects/nodes/update", {"projectId": qc_project_id, "nodes": nodes}, user_id=user_id
         )
         
         push_ui_message("project-nodes-update", {
@@ -249,10 +251,11 @@ async def read_lean_versions(runtime: ToolRuntime[Context]) -> str:
     """Get available LEAN versions on QuantConnect."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
-        result = await qc_request("/lean/versions", {"projectId": qc_project_id})
+        result = await qc_request("/lean/versions", {"projectId": qc_project_id}, user_id=user_id)
         
         versions = result.get("versions", [])
         push_ui_message("lean-versions", {

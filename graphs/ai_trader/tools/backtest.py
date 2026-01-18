@@ -29,6 +29,7 @@ async def create_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         project_id = runtime.context.get("project_id")  # Internal project ID for UI
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
@@ -43,6 +44,7 @@ async def create_backtest(
                 "compileId": compile_id,
                 "backtestName": backtest_name or f"Backtest {int(time.time())}",
             },
+            user_id=user_id,
         )
 
         backtest = result.get("backtest", {})
@@ -76,6 +78,7 @@ async def create_backtest(
             status_result = await qc_request(
                 "/backtests/read",
                 {"projectId": qc_project_id, "backtestId": backtest_id},
+                user_id=user_id,
             )
 
             status_backtest = status_result.get("backtest", {})
@@ -124,6 +127,7 @@ async def read_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -131,6 +135,7 @@ async def read_backtest(
         result = await qc_request(
             "/backtests/read",
             {"projectId": qc_project_id, "backtestId": backtest_id},
+            user_id=user_id,
         )
 
         backtest = result.get("backtest", {})
@@ -229,19 +234,20 @@ async def read_backtest_chart(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
 
         effective_count = min(max(sample_count, 10), 500)
-        
+
         # Polling configuration
         max_attempts = 5
         poll_delay = 1.5  # seconds between polls
-        
+
         chart_data = None
         series = {}
-        
+
         for attempt in range(max_attempts):
             data = await qc_request(
                 "/backtests/chart/read",
@@ -251,6 +257,7 @@ async def read_backtest_chart(
                     "name": name,
                     "count": effective_count,
                 },
+                user_id=user_id,
             )
             
             chart_data = data.get("chart", data)
@@ -368,6 +375,7 @@ async def read_backtest_orders(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -383,6 +391,7 @@ async def read_backtest_orders(
                 "start": start,
                 "end": end,
             },
+            user_id=user_id,
         )
 
         orders = data.get("orders", [])
@@ -438,6 +447,7 @@ async def read_backtest_insights(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -450,6 +460,7 @@ async def read_backtest_insights(
                 "start": start,
                 "end": end,
             },
+            user_id=user_id,
         )
 
         return json.dumps(data, indent=2)
@@ -473,6 +484,7 @@ async def list_backtests(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -480,6 +492,7 @@ async def list_backtests(
         result = await qc_request(
             "/backtests/list",
             {"projectId": qc_project_id, "includeStatistics": True},
+            user_id=user_id,
         )
 
         all_backtests = result.get("backtests", [])
@@ -543,6 +556,7 @@ async def update_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -556,7 +570,7 @@ async def update_backtest(
         if note:
             payload["note"] = note
 
-        await qc_request("/backtests/update", payload)
+        await qc_request("/backtests/update", payload, user_id=user_id)
 
         updated = []
         if name:
@@ -591,6 +605,7 @@ async def delete_backtest(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -598,6 +613,7 @@ async def delete_backtest(
         await qc_request(
             "/backtests/delete",
             {"projectId": qc_project_id, "backtestId": backtest_id},
+            user_id=user_id,
         )
 
         return json.dumps(

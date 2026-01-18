@@ -108,13 +108,14 @@ async def read_object_properties(
     """
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+        user_id = runtime.context.get("user_id")
         if not org_id:
             return json.dumps(
                 {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
             )
 
         data = await qc_request(
-            "/object/properties", {"organizationId": org_id, "key": key}
+            "/object/properties", {"organizationId": org_id, "key": key}, user_id=user_id
         )
         
         # Emit object properties UI
@@ -145,13 +146,14 @@ async def list_object_store_files(
     """
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+        user_id = runtime.context.get("user_id")
         if not org_id:
             return json.dumps(
                 {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
             )
 
         data = await qc_request(
-            "/object/list", {"organizationId": org_id, "path": path or ""}
+            "/object/list", {"organizationId": org_id, "path": path or ""}, user_id=user_id
         )
         
         objects = data.get("objects", [])
@@ -183,12 +185,13 @@ async def delete_object(
     """
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+        user_id = runtime.context.get("user_id")
         if not org_id:
             return json.dumps(
                 {"error": True, "message": "Missing QUANTCONNECT_ORGANIZATION_ID."}
             )
 
-        await qc_request("/object/delete", {"organizationId": org_id, "key": key})
+        await qc_request("/object/delete", {"organizationId": org_id, "key": key}, user_id=user_id)
         
         # Emit object-store delete UI
         push_ui_message("object-store-operation", {

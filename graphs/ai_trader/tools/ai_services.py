@@ -28,12 +28,14 @@ async def check_initialization_errors(
         file_name: Name of the file (default: main.py)
     """
     try:
+        user_id = runtime.context.get("user_id")
         data = await qc_request(
             "/ai/tools/backtest-init",
             {
                 "language": "Py",
                 "files": [{"name": file_name, "content": code}],
             },
+            user_id=user_id,
         )
         
         has_errors = data.get("hasError", False)
@@ -64,6 +66,7 @@ async def complete_code(
         response_limit: Maximum number of completion suggestions (default: 10)
     """
     try:
+        user_id = runtime.context.get("user_id")
         data = await qc_request(
             "/ai/tools/complete",
             {
@@ -71,6 +74,7 @@ async def complete_code(
                 "sentence": sentence,
                 "responseSizeLimit": response_limit,
             },
+            user_id=user_id,
         )
         
         completions = data.get("completions", [])
@@ -100,6 +104,7 @@ async def enhance_error_message(
         stacktrace: Optional stack trace for additional context
     """
     try:
+        user_id = runtime.context.get("user_id")
         error_obj = {"message": error_message}
         if stacktrace:
             error_obj["stacktrace"] = stacktrace
@@ -110,6 +115,7 @@ async def enhance_error_message(
                 "language": "Py",
                 "error": error_obj,
             },
+            user_id=user_id,
         )
         
         push_ui_message("error-explanation", {
@@ -138,12 +144,14 @@ async def check_syntax(
         file_name: Name of the file (default: main.py)
     """
     try:
+        user_id = runtime.context.get("user_id")
         data = await qc_request(
             "/ai/tools/syntax-check",
             {
                 "language": "Py",
                 "files": [{"name": file_name, "content": code}],
             },
+            user_id=user_id,
         )
         
         errors = data.get("errors", [])
@@ -175,11 +183,13 @@ async def update_code_to_pep8(
         file_name: Name of the file (default: main.py)
     """
     try:
+        user_id = runtime.context.get("user_id")
         data = await qc_request(
             "/ai/tools/pep8-convert",
             {
                 "files": [{"name": file_name, "content": code}],
             },
+            user_id=user_id,
         )
         
         push_ui_message("code-format", {
@@ -206,6 +216,7 @@ async def search_quantconnect(
         query: Search query
     """
     try:
+        user_id = runtime.context.get("user_id")
         # Use QC's structured search format with criteria
         data = await qc_request(
             "/ai/tools/search",
@@ -216,6 +227,7 @@ async def search_quantconnect(
                     {"input": query, "type": "Examples", "count": 3},
                 ],
             },
+            user_id=user_id,
         )
         
         results = data.get("results", [])

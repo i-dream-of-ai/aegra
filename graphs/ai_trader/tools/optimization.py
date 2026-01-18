@@ -29,6 +29,7 @@ async def estimate_optimization(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -60,6 +61,7 @@ async def estimate_optimization(
                 "nodeType": node_type,
                 "parallelNodes": parallel_nodes,
             },
+            user_id=user_id,
         )
 
         estimate = result.get("estimate", {})
@@ -107,6 +109,7 @@ async def create_optimization(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
 
         if not qc_project_id:
@@ -162,6 +165,7 @@ async def create_optimization(
                 "nodeType": node_type,
                 "parallelNodes": parallel_nodes,
             },
+            user_id=user_id,
         )
 
         opt_id = result.get("optimizations", [{}])[0].get(
@@ -247,6 +251,7 @@ async def read_optimization(
     
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -255,6 +260,7 @@ async def read_optimization(
         result = await qc_request(
             "/optimizations/read",
             {"optimizationId": optimization_id},
+            user_id=user_id,
         )
 
         opt = result.get("optimization", {})
@@ -390,6 +396,7 @@ async def list_optimizations(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -397,6 +404,7 @@ async def list_optimizations(
         result = await qc_request(
             "/optimizations/list",
             {"projectId": qc_project_id},
+            user_id=user_id,
         )
 
         all_opts = result.get("optimizations", [])
@@ -453,6 +461,7 @@ async def update_optimization(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -464,6 +473,7 @@ async def update_optimization(
                 "optimizationId": optimization_id,
                 "name": name,
             },
+            user_id=user_id,
         )
 
         return json.dumps(
@@ -493,6 +503,7 @@ async def abort_optimization(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -500,6 +511,7 @@ async def abort_optimization(
         await qc_request(
             "/optimizations/abort",
             {"projectId": qc_project_id, "optimizationId": optimization_id},
+            user_id=user_id,
         )
 
         return json.dumps(
@@ -529,6 +541,7 @@ async def delete_optimization(
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
+        user_id = runtime.context.get("user_id")
 
         if not qc_project_id:
             return json.dumps({"error": True, "message": "No project context."})
@@ -536,6 +549,7 @@ async def delete_optimization(
         await qc_request(
             "/optimizations/delete",
             {"projectId": qc_project_id, "optimizationId": optimization_id},
+            user_id=user_id,
         )
 
         return json.dumps(
