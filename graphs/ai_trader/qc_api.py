@@ -17,7 +17,13 @@ import httpx
 USE_SELF_HOSTED = os.environ.get("USE_SELF_HOSTED_LEAN", "").lower() == "true"
 LEAN_API_URL = os.environ.get("LEAN_API_URL", "http://localhost:3001")
 
-QC_API_URL = f"{LEAN_API_URL}/api/v2" if USE_SELF_HOSTED else "https://www.quantconnect.com/api/v2"
+# Base URLs for different services
+QC_CLOUD_API_URL = "https://www.quantconnect.com/api/v2"
+LEAN_API_BASE_URL = f"{LEAN_API_URL}/api/v2"
+
+# Endpoints that should always go to QC Cloud (not available in self-hosted)
+# These are AI services that require QC Cloud infrastructure
+QC_CLOUD_ONLY_PREFIXES = ["/ai/tools/", "/object/"]
 
 
 def get_qc_auth_headers(user_id_for_request: str | None = None) -> dict[str, str]:
@@ -61,6 +67,33 @@ def get_qc_auth_headers(user_id_for_request: str | None = None) -> dict[str, str
     }
 
 
+def _is_cloud_only_endpoint(endpoint: str) -> bool:
+    """Check if endpoint should always go to QC Cloud."""
+    return any(endpoint.startswith(prefix) for prefix in QC_CLOUD_ONLY_PREFIXES)
+
+
+def _get_qc_cloud_auth_headers() -> dict[str, str]:
+    """Generate authentication headers for QC Cloud."""
+    qc_user_id = os.environ.get("QUANTCONNECT_USER_ID")
+    api_token = os.environ.get("QUANTCONNECT_TOKEN")
+    org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
+
+    if not all([qc_user_id, api_token, org_id]):
+        raise ValueError("Missing QuantConnect credentials")
+
+    timestamp = int(time.time())
+    timestamped_token = f"{api_token}:{timestamp}"
+    hashed_token = hashlib.sha256(timestamped_token.encode()).hexdigest()
+    authentication = f"{qc_user_id}:{hashed_token}"
+    auth_header = f"Basic {base64.b64encode(authentication.encode()).decode()}"
+
+    return {
+        "Authorization": auth_header,
+        "Timestamp": str(timestamp),
+        "Content-Type": "application/json",
+    }
+
+
 async def qc_request(
     endpoint: str,
     payload: dict[str, Any] | None = None,
@@ -69,14 +102,27 @@ async def qc_request(
 ) -> Any:
     """Make authenticated request to QuantConnect API.
 
+    Routes requests to either self-hosted LEAN or QC Cloud based on:
+    - USE_SELF_HOSTED setting
+    - Endpoint type (some endpoints are cloud-only like /ai/tools/*)
+
     Args:
         endpoint: API endpoint path (e.g., "/files/read")
         payload: Request body as dict
         method: HTTP method (default POST)
         user_id: User ID for ownership verification (required for self-hosted LEAN)
     """
-    headers = get_qc_auth_headers(user_id)
-    url = f"{QC_API_URL}{endpoint}"
+    # Determine if this request should go to QC Cloud
+    use_cloud = not USE_SELF_HOSTED or _is_cloud_only_endpoint(endpoint)
+
+    if use_cloud:
+        # Always use QC Cloud auth for cloud endpoints
+        headers = _get_qc_cloud_auth_headers()
+        url = f"{QC_CLOUD_API_URL}{endpoint}"
+    else:
+        # Self-hosted LEAN auth
+        headers = get_qc_auth_headers(user_id)
+        url = f"{LEAN_API_BASE_URL}{endpoint}"
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         if method == "GET":
