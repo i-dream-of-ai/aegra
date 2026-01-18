@@ -470,15 +470,32 @@ async function runLeanBacktest(
       console.error('[LEAN] Stderr:', result.stderr);
       console.error('[LEAN] Stdout:', result.stdout.substring(0, 2000));
 
-      // Try to find error in LEAN logs
-      let errorMessage = 'LEAN backtest failed';
-      if (result.stderr.includes('Error')) {
-        errorMessage = result.stderr.split('\n').find(l => l.includes('Error')) || errorMessage;
+      // Build detailed error message from all available information
+      const errorParts: string[] = [`Docker exit code: ${result.code}`];
+
+      // Always include stderr if present (trimmed)
+      if (result.stderr && result.stderr.trim()) {
+        errorParts.push(`stderr: ${result.stderr.trim().substring(0, 500)}`);
+      }
+
+      // Look for specific error patterns in stdout
+      if (result.stdout) {
+        // Look for Python exceptions
+        const exceptionMatch = result.stdout.match(/(?:Exception|Error|Traceback).*?(?=\n\n|\n[A-Z]|$)/s);
+        if (exceptionMatch) {
+          errorParts.push(`LEAN error: ${exceptionMatch[0].substring(0, 500)}`);
+        }
+
+        // Look for LEAN runtime errors
+        const runtimeError = result.stdout.match(/Runtime Error:.*$/m);
+        if (runtimeError) {
+          errorParts.push(runtimeError[0]);
+        }
       }
 
       return {
         success: false,
-        error: errorMessage,
+        error: errorParts.join(' | '),
       };
     }
 
