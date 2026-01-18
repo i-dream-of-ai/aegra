@@ -78,27 +78,42 @@ async def qc_request(
                 method, url, headers=headers, json=payload or {}
             )
 
-        response.raise_for_status()
+        # Parse JSON body BEFORE checking status - API errors include useful info
+        data = None
+        if response.content and response.content.strip():
+            try:
+                data = response.json()
+            except Exception:
+                pass  # Will handle below
+
+        # Check for API-level errors in the response body (QC pattern: success: false)
+        if isinstance(data, dict) and data.get("success") is False:
+            errors = data.get("errors", [])
+            error_msg = "; ".join(errors) if errors else data.get("error", str(data))
+            raise Exception(f"QC API error ({response.status_code}): {error_msg}")
+
+        # Now check HTTP status - but include body in error for debugging
+        if response.status_code >= 400:
+            error_detail = ""
+            if data:
+                error_detail = f" - {data}"
+            elif response.text:
+                error_detail = f" - {response.text[:200]}"
+            raise Exception(
+                f"QC API {response.status_code} for {endpoint}{error_detail}"
+            )
 
         # Handle empty response body
         if not response.content or response.content.strip() == b"":
             raise Exception(f"QC API returned empty response for {endpoint}")
 
-        try:
-            data = response.json()
-        except Exception as e:
+        if data is None:
             raise Exception(
                 f"QC API returned invalid JSON for {endpoint}: {response.text[:200]}"
-            ) from e
+            )
 
         # Handle case where API returns a string instead of dict
         if isinstance(data, str):
             raise Exception(f"QC API returned unexpected string: {data}")
-
-        # Handle QC API success: false pattern
-        if isinstance(data, dict) and data.get("success") is False:
-            errors = data.get("errors", [])
-            error_msg = "; ".join(errors) if errors else data.get("error", str(data))
-            raise Exception(f"QC API error: {error_msg}")
 
         return data
