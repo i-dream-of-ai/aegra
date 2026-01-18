@@ -87,12 +87,49 @@ async def create_backtest(
 
             # Check for initialization errors
             if isinstance(status_backtest, dict):
-                if status_backtest.get("error") or status_backtest.get("hasInitializeError"):
-                    error_msg = status_backtest.get("error", "Initialization error")
+                has_error = (
+                    status_backtest.get("error") or
+                    status_backtest.get("hasInitializeError") or
+                    status_backtest.get("status") in ["RuntimeError", "Error"]
+                )
+                if has_error:
+                    # Collect ALL error information from the response
+                    error_parts = []
+
+                    # Primary error message
+                    if status_backtest.get("error"):
+                        error_parts.append(str(status_backtest.get("error")))
+
+                    # Stack trace if available
+                    if status_backtest.get("stacktrace"):
+                        error_parts.append(f"Stack trace: {status_backtest.get('stacktrace')}")
+                    elif status_backtest.get("stackTrace"):
+                        error_parts.append(f"Stack trace: {status_backtest.get('stackTrace')}")
+
+                    # Runtime logs often contain useful error info
+                    logs = status_backtest.get("logs") or status_backtest.get("runtimeLogs") or []
+                    if logs and isinstance(logs, list):
+                        error_logs = [log for log in logs[-10:] if "error" in str(log).lower() or "exception" in str(log).lower()]
+                        if error_logs:
+                            error_parts.append(f"Logs: {'; '.join(str(l) for l in error_logs[:5])}")
+
+                    # Check for error in runtimeStatistics
+                    runtime_stats = status_backtest.get("runtimeStatistics", {})
+                    if isinstance(runtime_stats, dict) and runtime_stats.get("Error"):
+                        error_parts.append(f"Runtime error: {runtime_stats.get('Error')}")
+
+                    # Default message if nothing found
+                    if not error_parts:
+                        error_parts.append("Initialization error (no details available)")
+
+                    error_msg = " | ".join(error_parts)
+
                     return json.dumps({
                         "error": True,
                         "backtest_id": backtest_id,
-                        "message": f"Backtest failed to start: {error_msg}",
+                        "message": f"Backtest failed: {error_msg}",
+                        "raw_status": status_backtest.get("status"),
+                        "has_initialize_error": status_backtest.get("hasInitializeError"),
                     })
 
                 # If we see progress > 0, it's running successfully
