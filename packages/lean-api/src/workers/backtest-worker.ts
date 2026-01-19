@@ -389,6 +389,13 @@ async function runLeanBacktest(
 
     await onProgress(20);
 
+    // Ensure market data is cached from provider (Alpha Vantage, Alpaca, etc.)
+    // This will fetch data if not already in the database
+    console.log(`[LEAN Data] Ensuring market data cached for symbols: ${symbols.join(', ')}`);
+    await ensureMultipleSymbolsCached(symbols, startDate, endDate);
+
+    await onProgress(30);
+
     // Export market data for each symbol
     for (const symbol of symbols) {
       const bars = await getDailyBars(symbol, startDate, endDate);
