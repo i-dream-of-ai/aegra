@@ -5,25 +5,50 @@ import json
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 from ..supabase_client import SupabaseClient
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class WaitInput(BaseModel):
+    """Input schema for wait tool."""
+    seconds: int = Field(description="Number of seconds to wait (1-60)")
+    reason: str = Field(description="Why we are waiting (e.g., 'Waiting for backtest to complete')")
+
+
+class GetCodeVersionsInput(BaseModel):
+    """Input schema for get_code_versions tool."""
+    page: int = Field(default=1, description="Page number (starts at 1)")
+    page_size: int = Field(default=10, description="Results per page (max 20)")
+
+
+class GetCodeVersionInput(BaseModel):
+    """Input schema for get_code_version tool."""
+    version_id: int = Field(description="The ID of the code version to retrieve")
+
+
+class UpdateProjectNodesInput(BaseModel):
+    """Input schema for update_project_nodes tool."""
+    nodes: list[str] = Field(description="List of node identifiers (e.g., ['L1-1', 'L1-2'])")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=WaitInput)
 async def wait(
     seconds: int,
     reason: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Wait for a specified duration before continuing.
-
-    Args:
-        seconds: Number of seconds to wait (1-60)
-        reason: Why we are waiting (e.g., "Waiting for backtest to complete")
-    """
+    """Wait for a specified duration before continuing."""
     # Clamp to reasonable bounds
     wait_time = max(1, min(60, seconds))
     
@@ -46,19 +71,13 @@ async def wait(
     )
 
 
-@tool
+@tool(args_schema=GetCodeVersionsInput)
 async def get_code_versions(
     runtime: ToolRuntime[Context],
     page: int = 1,
     page_size: int = 10,
 ) -> str:
-    """
-    List saved code versions for this project with pagination.
-
-    Args:
-        page: Page number (default: 1)
-        page_size: Results per page (default: 10, max: 20)
-    """
+    """List saved code versions for this project with pagination."""
     try:
         project_db_id = runtime.context.get("project_db_id")
         if not project_db_id:
@@ -137,17 +156,12 @@ async def get_code_versions(
         )
 
 
-@tool
+@tool(args_schema=GetCodeVersionInput)
 async def get_code_version(
     version_id: int,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Get a specific code version by ID.
-
-    Args:
-        version_id: The ID of the code version to retrieve
-    """
+    """Get a specific code version by ID."""
     try:
         if not version_id:
             return json.dumps({"error": True, "message": "version_id is required."})
@@ -209,17 +223,12 @@ async def read_project_nodes(runtime: ToolRuntime[Context]) -> str:
         )
 
 
-@tool
+@tool(args_schema=UpdateProjectNodesInput)
 async def update_project_nodes(
     nodes: list[str],
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Update the enabled nodes for a QuantConnect project.
-
-    Args:
-        nodes: List of node identifiers (e.g., ["L1-1", "L1-2"])
-    """
+    """Update the enabled nodes for a QuantConnect project."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")

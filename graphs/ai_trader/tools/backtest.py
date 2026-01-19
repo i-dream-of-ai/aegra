@@ -7,26 +7,79 @@ import time
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class CreateBacktestInput(BaseModel):
+    """Input schema for create_backtest tool."""
+    compile_id: str = Field(description="The QuantConnect compile ID from a successful compilation")
+    backtest_name: str = Field(
+        description="Descriptive name for the backtest. Format: '[Symbols] [Strategy Type]'. Example: 'AAPL Momentum Strategy'"
+    )
+
+
+class ReadBacktestInput(BaseModel):
+    """Input schema for read_backtest tool."""
+    backtest_id: str = Field(description="The backtest ID to read")
+
+
+class ReadBacktestChartInput(BaseModel):
+    """Input schema for read_backtest_chart tool."""
+    backtest_id: str = Field(description="The backtest ID")
+    name: str = Field(description="Chart name (e.g., 'Strategy Equity', 'Benchmark', 'Drawdown')")
+    sample_count: int = Field(default=100, description="Number of data points (10-500)")
+
+
+class ReadBacktestOrdersInput(BaseModel):
+    """Input schema for read_backtest_orders tool."""
+    backtest_id: str = Field(description="The backtest ID")
+    page: int = Field(default=1, description="Page number (starts at 1)")
+    page_size: int = Field(default=50, description="Orders per page (max 100)")
+
+
+class ReadBacktestInsightsInput(BaseModel):
+    """Input schema for read_backtest_insights tool."""
+    backtest_id: str = Field(description="The backtest ID")
+    start: int = Field(default=0, description="Start index")
+    end: int = Field(default=100, description="End index")
+
+
+class ListBacktestsInput(BaseModel):
+    """Input schema for list_backtests tool."""
+    page: int = Field(default=1, description="Page number (starts at 1)")
+    page_size: int = Field(default=10, description="Results per page (max 20)")
+
+
+class UpdateBacktestInput(BaseModel):
+    """Input schema for update_backtest tool."""
+    backtest_id: str = Field(description="The backtest ID to update")
+    name: str | None = Field(default=None, description="New name for the backtest")
+    note: str | None = Field(default=None, description="Note/description for the backtest")
+
+
+class DeleteBacktestInput(BaseModel):
+    """Input schema for delete_backtest tool."""
+    backtest_id: str = Field(description="The backtest ID to delete")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=CreateBacktestInput)
 async def create_backtest(
     compile_id: str,
     backtest_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Create and queue a backtest on QuantConnect.
-    Polls briefly to confirm it started without errors, then returns.
-    The UI handles live progress streaming independently.
-
-    Args:
-        compile_id: The QuantConnect compile ID
-        backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
-    """
+    """Create and queue a backtest on QuantConnect. The UI handles live progress streaming."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -151,17 +204,12 @@ async def create_backtest(
         )
 
 
-@tool
+@tool(args_schema=ReadBacktestInput)
 async def read_backtest(
     backtest_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Read backtest status and key statistics from QuantConnect.
-
-    Args:
-        backtest_id: The backtest ID to read
-    """
+    """Read backtest status and key statistics from QuantConnect."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -251,26 +299,14 @@ async def read_backtest(
         return json.dumps({"error": True, "message": f"Failed to read backtest: {e!s}"})
 
 
-@tool
+@tool(args_schema=ReadBacktestChartInput)
 async def read_backtest_chart(
     backtest_id: str,
     name: str,
     runtime: ToolRuntime[Context],
     sample_count: int = 100,
 ) -> str:
-    """
-    Read chart data from a backtest. Triggers chart generation, polls until ready, returns data.
-
-    This tool handles the full QC chart lifecycle:
-    1. Initial request triggers chart generation on QC servers
-    2. Polls with short delays until chart data is populated
-    3. Returns complete chart with series data
-
-    Args:
-        backtest_id: The backtest ID
-        name: Chart name (e.g., "Strategy Equity", "Benchmark", "Drawdown")
-        sample_count: Number of data points (default: 100, max: 500)
-    """
+    """Read chart data from a backtest. Polls until chart data is ready."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -397,21 +433,14 @@ async def read_backtest_chart(
         )
 
 
-@tool
+@tool(args_schema=ReadBacktestOrdersInput)
 async def read_backtest_orders(
     backtest_id: str,
     runtime: ToolRuntime[Context],
     page: int = 1,
     page_size: int = 50,
 ) -> str:
-    """
-    Read paginated order history from a backtest.
-
-    Args:
-        backtest_id: The backtest ID
-        page: Page number (default: 1)
-        page_size: Orders per page (default: 50, max: 100)
-    """
+    """Read paginated order history from a backtest."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -469,21 +498,14 @@ async def read_backtest_orders(
         return json.dumps({"error": True, "message": f"Failed to read orders: {e!s}"})
 
 
-@tool
+@tool(args_schema=ReadBacktestInsightsInput)
 async def read_backtest_insights(
     backtest_id: str,
     runtime: ToolRuntime[Context],
     start: int = 0,
     end: int = 100,
 ) -> str:
-    """
-    Read insights from a backtest.
-
-    Args:
-        backtest_id: The backtest ID
-        start: Start index (default: 0)
-        end: End index (default: 100)
-    """
+    """Read insights from a backtest."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -508,19 +530,13 @@ async def read_backtest_insights(
         return json.dumps({"error": True, "message": f"Failed to read insights: {e!s}"})
 
 
-@tool
+@tool(args_schema=ListBacktestsInput)
 async def list_backtests(
     runtime: ToolRuntime[Context],
     page: int = 1,
     page_size: int = 10,
 ) -> str:
-    """
-    List backtests for current project with pagination.
-
-    Args:
-        page: Page number (default: 1)
-        page_size: Results per page (default: 10, max: 20)
-    """
+    """List backtests for current project with pagination."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -578,21 +594,14 @@ async def list_backtests(
         )
 
 
-@tool
+@tool(args_schema=UpdateBacktestInput)
 async def update_backtest(
     backtest_id: str,
     runtime: ToolRuntime[Context],
     name: str = None,
     note: str = None,
 ) -> str:
-    """
-    Update a backtest name and/or note.
-
-    Args:
-        backtest_id: The backtest ID
-        name: New name (optional)
-        note: Note/description (optional)
-    """
+    """Update a backtest name and/or note."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -631,17 +640,12 @@ async def update_backtest(
         )
 
 
-@tool
+@tool(args_schema=DeleteBacktestInput)
 async def delete_backtest(
     backtest_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Delete a backtest. This action cannot be undone.
-
-    Args:
-        backtest_id: The backtest ID to delete
-    """
+    """Delete a backtest. This action cannot be undone."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")

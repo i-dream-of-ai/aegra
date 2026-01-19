@@ -9,24 +9,48 @@ import time
 import httpx
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class UploadObjectInput(BaseModel):
+    """Input schema for upload_object tool."""
+    key: str = Field(description="Object key/name. Use .txt extension for readable content, .json for structured data.")
+    content: str = Field(description="Content to upload")
+
+
+class ReadObjectPropertiesInput(BaseModel):
+    """Input schema for read_object_properties tool."""
+    key: str = Field(description="Object key to read properties for")
+
+
+class ListObjectStoreFilesInput(BaseModel):
+    """Input schema for list_object_store_files tool."""
+    path: str = Field(default="", description="Optional path to list (e.g., '/folder1'). Empty for root.")
+
+
+class DeleteObjectInput(BaseModel):
+    """Input schema for delete_object tool."""
+    key: str = Field(description="Object key to delete")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=UploadObjectInput)
 async def upload_object(
     key: str,
     content: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Upload data to QuantConnect object store.
-
-    Args:
-        key: Object key/name (use .txt for readable content)
-        content: Content to upload
-    """
+    """Upload data to QuantConnect object store."""
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         user_id = os.environ.get("QUANTCONNECT_USER_ID")
@@ -95,17 +119,12 @@ async def upload_object(
         return json.dumps({"error": True, "message": f"Failed to upload object: {e!s}"})
 
 
-@tool
+@tool(args_schema=ReadObjectPropertiesInput)
 async def read_object_properties(
     key: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Read object store file metadata.
-
-    Args:
-        key: Object key to read properties for
-    """
+    """Read object store file metadata."""
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         user_id = runtime.context.get("user_id")
@@ -133,17 +152,12 @@ async def read_object_properties(
         )
 
 
-@tool
+@tool(args_schema=ListObjectStoreFilesInput)
 async def list_object_store_files(
     runtime: ToolRuntime[Context],
     path: str = "",
 ) -> str:
-    """
-    List object store files and get their keys.
-
-    Args:
-        path: Optional path to list (e.g., "/folder1"). Empty for root.
-    """
+    """List object store files and get their keys."""
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         user_id = runtime.context.get("user_id")
@@ -172,17 +186,12 @@ async def list_object_store_files(
         )
 
 
-@tool
+@tool(args_schema=DeleteObjectInput)
 async def delete_object(
     key: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Delete an object from the QuantConnect object store.
-
-    Args:
-        key: Object key to delete
-    """
+    """Delete an object from the QuantConnect object store."""
     try:
         org_id = os.environ.get("QUANTCONNECT_ORGANIZATION_ID")
         user_id = runtime.context.get("user_id")

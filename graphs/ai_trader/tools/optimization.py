@@ -2,15 +2,104 @@
 
 import json
 import os
+from typing import Literal
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class ParameterConfig(BaseModel):
+    """Configuration for a single optimization parameter."""
+    name: str = Field(description="Parameter name as defined in the algorithm using self.get_parameter()")
+    min: float = Field(description="Minimum value for the parameter")
+    max: float = Field(description="Maximum value for the parameter")
+    step: float = Field(description="Step size between values")
+
+
+class ConstraintConfig(BaseModel):
+    """Configuration for an optimization constraint."""
+    target: str = Field(description="Target metric (e.g., 'TotalPerformance.PortfolioStatistics.Drawdown')")
+    operator: Literal["less", "lessorequal", "greater", "greaterorequal", "equals", "notequal"] = Field(
+        description="Comparison operator"
+    )
+    targetValue: float = Field(description="Value to compare against")
+
+
+class EstimateOptimizationInput(BaseModel):
+    """Input schema for estimate_optimization tool."""
+    compile_id: str = Field(description="The compile ID from a successful compilation")
+    parameters: list[ParameterConfig] = Field(description="List of parameter configs (max 3). Each has name, min, max, step.")
+    node_type: Literal["O2-8", "O4-12", "O8-16"] = Field(
+        default="O2-8",
+        description="Node type for optimization. O2-8 (2 CPU, 8GB RAM), O4-12 (4 CPU, 12GB RAM), O8-16 (8 CPU, 16GB RAM)"
+    )
+    parallel_nodes: int = Field(default=6, description="Number of parallel nodes (1-12)")
+
+
+class CreateOptimizationInput(BaseModel):
+    """Input schema for create_optimization tool."""
+    compile_id: str = Field(description="The compile ID from a successful compilation")
+    optimization_name: str = Field(
+        description="Descriptive name. Format: '[Symbols] [Strategy] - Optimizing [Params]'. Example: 'SPY Momentum - Optimizing RSI Period'"
+    )
+    target: str = Field(
+        description="Target metric to optimize. Common: 'TotalPerformance.PortfolioStatistics.SharpeRatio', 'TotalPerformance.PortfolioStatistics.NetProfit'"
+    )
+    target_to: Literal["max", "min"] = Field(description="Direction: 'max' to maximize, 'min' to minimize")
+    parameters: list[ParameterConfig] = Field(description="List of parameter configs (max 3). Each has name, min, max, step.")
+    constraints: list[ConstraintConfig] | None = Field(
+        default=None,
+        description="Optional constraints like minimum Sharpe or maximum drawdown"
+    )
+    node_type: Literal["O2-8", "O4-12", "O8-16"] = Field(
+        default="O2-8",
+        description="Node type for optimization"
+    )
+    parallel_nodes: int = Field(default=4, description="Number of parallel nodes (1-12)")
+
+
+class ReadOptimizationInput(BaseModel):
+    """Input schema for read_optimization tool."""
+    optimization_id: str = Field(description="The optimization ID to read")
+    page: int = Field(default=1, description="Page number (starts at 1)")
+    page_size: int = Field(default=20, description="Results per page (max 50)")
+
+
+class ListOptimizationsInput(BaseModel):
+    """Input schema for list_optimizations tool."""
+    page: int = Field(default=1, description="Page number (starts at 1)")
+    page_size: int = Field(default=10, description="Results per page (max 20)")
+
+
+class UpdateOptimizationInput(BaseModel):
+    """Input schema for update_optimization tool."""
+    optimization_id: str = Field(description="The optimization ID to update")
+    name: str = Field(description="New name for the optimization")
+
+
+class AbortOptimizationInput(BaseModel):
+    """Input schema for abort_optimization tool."""
+    optimization_id: str = Field(description="The optimization ID to abort")
+
+
+class DeleteOptimizationInput(BaseModel):
+    """Input schema for delete_optimization tool."""
+    optimization_id: str = Field(description="The optimization ID to delete")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=EstimateOptimizationInput)
 async def estimate_optimization(
     compile_id: str,
     parameters: list[dict],
@@ -18,15 +107,7 @@ async def estimate_optimization(
     node_type: str = "O2-8",
     parallel_nodes: int = 6,
 ) -> str:
-    """
-    Estimate optimization cost and runtime before creating.
-
-    Args:
-        compile_id: The compile ID
-        parameters: List of parameter configs [{name, min, max, step}]
-        node_type: Node type ("O2-8", "O4-12", "O8-16")
-        parallel_nodes: Number of parallel nodes (default: 6)
-    """
+    """Estimate optimization cost and runtime before creating."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -82,7 +163,7 @@ async def estimate_optimization(
         return json.dumps({"error": True, "message": f"Failed to estimate: {e!s}"})
 
 
-@tool
+@tool(args_schema=CreateOptimizationInput)
 async def create_optimization(
     compile_id: str,
     optimization_name: str,
@@ -94,19 +175,7 @@ async def create_optimization(
     node_type: str = "O2-8",
     parallel_nodes: int = 4,
 ) -> str:
-    """
-    Create a parameter optimization job on QuantConnect. Max 3 parameters.
-
-    Args:
-        compile_id: The compile ID
-        optimization_name: Name format: "[Symbols] [Strategy] - Optimizing [Params]"
-        target: Target metric (e.g., "TotalPerformance.PortfolioStatistics.SharpeRatio")
-        target_to: Direction: "max" or "min"
-        parameters: List of parameter configs (max 3) [{name, min, max, step}]
-        constraints: Optional constraints [{target, operator, targetValue}]
-        node_type: Node type ("O2-8", "O4-12", "O8-16")
-        parallel_nodes: Number of parallel nodes (default: 4)
-    """
+    """Create a parameter optimization job on QuantConnect. Max 3 parameters."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -199,21 +268,14 @@ async def create_optimization(
         )
 
 
-@tool
+@tool(args_schema=ReadOptimizationInput)
 async def read_optimization(
     optimization_id: str,
     runtime: ToolRuntime[Context],
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """
-    Read optimization status and paginated results.
-
-    Args:
-        optimization_id: The optimization ID
-        page: Page number (default: 1)
-        page_size: Results per page (default: 20, max: 50)
-    """
+    """Read optimization status and paginated results."""
     # QC statistics indices (from their docs):
     # [0]=alpha, [1]=annual std dev, [2]=annual variance, [3]=avg loss%, [4]=avg win%,
     # [5]=beta, [6]=cagr%, [7]=drawdown%, [8]=estimated capacity, [9]=expectancy,
@@ -381,19 +443,13 @@ async def read_optimization(
         )
 
 
-@tool
+@tool(args_schema=ListOptimizationsInput)
 async def list_optimizations(
     runtime: ToolRuntime[Context],
     page: int = 1,
     page_size: int = 10,
 ) -> str:
-    """
-    List optimizations for the current project with pagination.
-
-    Args:
-        page: Page number (default: 1)
-        page_size: Results per page (default: 10, max: 20)
-    """
+    """List optimizations for the current project with pagination."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -446,19 +502,13 @@ async def list_optimizations(
         )
 
 
-@tool
+@tool(args_schema=UpdateOptimizationInput)
 async def update_optimization(
     optimization_id: str,
     name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Update the name of an optimization.
-
-    Args:
-        optimization_id: The optimization ID
-        name: New name
-    """
+    """Update the name of an optimization."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -490,17 +540,12 @@ async def update_optimization(
         )
 
 
-@tool
+@tool(args_schema=AbortOptimizationInput)
 async def abort_optimization(
     optimization_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Abort a running optimization. Completed backtests will be kept.
-
-    Args:
-        optimization_id: The optimization ID to abort
-    """
+    """Abort a running optimization. Completed backtests will be kept."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -528,17 +573,12 @@ async def abort_optimization(
         )
 
 
-@tool
+@tool(args_schema=DeleteOptimizationInput)
 async def delete_optimization(
     optimization_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Delete an optimization and all its results. This cannot be undone.
-
-    Args:
-        optimization_id: The optimization ID to delete
-    """
+    """Delete an optimization and all its results. This cannot be undone."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")

@@ -4,24 +4,55 @@ import json
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class CreateFileInput(BaseModel):
+    """Input schema for qc_create_file tool."""
+    file_name: str = Field(description="Name of the file (e.g., 'utils.py', 'research.py')")
+    content: str = Field(description="Full content of the file")
+
+
+class ReadFileInput(BaseModel):
+    """Input schema for qc_read_file tool."""
+    file_name: str = Field(description="Name of the file to read, or '*' to read all files")
+
+
+class UpdateFileInput(BaseModel):
+    """Input schema for qc_update_file tool."""
+    file_name: str = Field(description="Name of the file to update")
+    content: str = Field(description="New full content for the file - must be the COMPLETE file")
+
+
+class RenameFileInput(BaseModel):
+    """Input schema for qc_rename_file tool."""
+    old_file_name: str = Field(description="Current name of the file")
+    new_file_name: str = Field(description="New name for the file")
+
+
+class DeleteFileInput(BaseModel):
+    """Input schema for qc_delete_file tool."""
+    file_name: str = Field(description="Name of the file to delete")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=CreateFileInput)
 async def qc_create_file(
     file_name: str,
     content: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Create a new file in the QuantConnect project.
-
-    Args:
-        file_name: Name of the file (e.g., "utils.py", "research.py")
-        content: Full content of the file
-    """
+    """Create a new file in the QuantConnect project."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -59,18 +90,12 @@ async def qc_create_file(
         return json.dumps({"error": True, "message": f"Failed to create file: {e!s}"})
 
 
-@tool
+@tool(args_schema=ReadFileInput)
 async def qc_read_file(
     file_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Read a file from the QuantConnect project.
-    Use "*" to read all files.
-
-    Args:
-        file_name: Name of the file to read, or "*" for all files
-    """
+    """Read a file from the QuantConnect project. Use '*' to read all files."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -104,13 +129,13 @@ async def qc_read_file(
                         "content": f.get("content"),
                     }
                 )
-            
+
             # Emit file-list UI
             push_ui_message("file-list", {
                 "files": [{"name": f["name"], "lines": len(f.get("content", "").split("\n"))} for f in file_list],
                 "count": len(file_list),
             }, message={"id": runtime.tool_call_id})
-            
+
             return json.dumps(
                 {
                     "success": True,
@@ -144,19 +169,13 @@ async def qc_read_file(
         return json.dumps({"error": True, "message": f"Failed to read file: {e!s}"})
 
 
-@tool
+@tool(args_schema=UpdateFileInput)
 async def qc_update_file(
     file_name: str,
     content: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Update an existing file in the QuantConnect project.
-
-    Args:
-        file_name: Name of the file to update
-        content: New full content for the file
-    """
+    """Update an existing file in the QuantConnect project with new content."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -195,19 +214,13 @@ async def qc_update_file(
         return json.dumps({"error": True, "message": f"Failed to update file: {e!s}"})
 
 
-@tool
+@tool(args_schema=RenameFileInput)
 async def qc_rename_file(
     old_file_name: str,
     new_file_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Rename a file in the QuantConnect project.
-
-    Args:
-        old_file_name: Current name of the file
-        new_file_name: New name for the file
-    """
+    """Rename a file in the QuantConnect project."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
@@ -258,17 +271,12 @@ async def qc_rename_file(
         )
 
 
-@tool
+@tool(args_schema=DeleteFileInput)
 async def qc_delete_file(
     file_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Delete a file from the QuantConnect project.
-
-    Args:
-        file_name: Name of the file to delete
-    """
+    """Delete a file from the QuantConnect project."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")

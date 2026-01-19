@@ -7,6 +7,7 @@ import re
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
@@ -14,19 +15,67 @@ from ..supabase_client import SupabaseClient
 from ..tools.utils import format_error, format_success
 
 
-@tool
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class CheckInitializationErrorsInput(BaseModel):
+    """Input schema for check_initialization_errors tool."""
+    code: str = Field(description="Python code to check for initialization errors")
+    file_name: str = Field(default="main.py", description="Name of the file (default: main.py)")
+
+
+class CompleteCodeInput(BaseModel):
+    """Input schema for complete_code tool."""
+    sentence: str = Field(description="The code fragment to complete (e.g., 'self.add_eq', 'AddEq')")
+    response_limit: int = Field(default=10, description="Maximum number of completion suggestions (1-20)")
+
+
+class EnhanceErrorMessageInput(BaseModel):
+    """Input schema for enhance_error_message tool."""
+    error_message: str = Field(description="Error message to enhance")
+    stacktrace: str | None = Field(default=None, description="Optional stack trace for additional context")
+
+
+class CheckSyntaxInput(BaseModel):
+    """Input schema for check_syntax tool."""
+    code: str = Field(description="Python code to check for syntax errors")
+    file_name: str = Field(default="main.py", description="Name of the file (default: main.py)")
+
+
+class UpdateCodeToPep8Input(BaseModel):
+    """Input schema for update_code_to_pep8 tool."""
+    code: str = Field(description="Python code to format")
+    file_name: str = Field(default="main.py", description="Name of the file (default: main.py)")
+
+
+class SearchQuantconnectInput(BaseModel):
+    """Input schema for search_quantconnect tool."""
+    query: str = Field(description="Search query for QuantConnect documentation and examples")
+
+
+class SearchLocalAlgorithmsInput(BaseModel):
+    """Input schema for search_local_algorithms tool."""
+    query: str = Field(description="Semantic search query (e.g., 'momentum strategy with stop loss')")
+    limit: int = Field(default=5, description="Number of results to return (max 10)")
+
+
+class GetAlgorithmCodeInput(BaseModel):
+    """Input schema for get_algorithm_code tool."""
+    algorithm_id: str = Field(description="The ID or file_path from search results")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
+@tool(args_schema=CheckInitializationErrorsInput)
 async def check_initialization_errors(
     code: str,
     runtime: ToolRuntime[Context],
     file_name: str = "main.py",
 ) -> str:
-    """
-    Check Python code for potential initialization errors by running a short backtest.
-
-    Args:
-        code: Python code to check
-        file_name: Name of the file (default: main.py)
-    """
+    """Check Python code for potential initialization errors by running a short backtest."""
     try:
         user_id = runtime.context.get("user_id")
         data = await qc_request(
@@ -52,19 +101,13 @@ async def check_initialization_errors(
         return format_error(f"Failed to check initialization errors: {str(e)}")
 
 
-@tool
+@tool(args_schema=CompleteCodeInput)
 async def complete_code(
     sentence: str,
     runtime: ToolRuntime[Context],
     response_limit: int = 10,
 ) -> str:
-    """
-    AI code completion for QuantConnect algorithms.
-
-    Args:
-        sentence: The code fragment to complete (e.g., "self.add_eq", "AddEq")
-        response_limit: Maximum number of completion suggestions (default: 10)
-    """
+    """AI code completion for QuantConnect algorithms."""
     try:
         user_id = runtime.context.get("user_id")
         data = await qc_request(
@@ -90,19 +133,13 @@ async def complete_code(
         return format_error(f"Failed to get code completion: {str(e)}")
 
 
-@tool
+@tool(args_schema=EnhanceErrorMessageInput)
 async def enhance_error_message(
     error_message: str,
     runtime: ToolRuntime[Context],
     stacktrace: str = None,
 ) -> str:
-    """
-    Get enhanced error explanations with suggestions for fixes.
-
-    Args:
-        error_message: Error message to enhance
-        stacktrace: Optional stack trace for additional context
-    """
+    """Get enhanced error explanations with suggestions for fixes."""
     try:
         user_id = runtime.context.get("user_id")
         error_obj = {"message": error_message}
@@ -130,19 +167,13 @@ async def enhance_error_message(
         return format_error(f"Failed to enhance error message: {str(e)}")
 
 
-@tool
+@tool(args_schema=CheckSyntaxInput)
 async def check_syntax(
     code: str,
     runtime: ToolRuntime[Context],
     file_name: str = "main.py",
 ) -> str:
-    """
-    Check Python code syntax for errors before compiling.
-
-    Args:
-        code: Python code to check
-        file_name: Name of the file (default: main.py)
-    """
+    """Check Python code syntax for errors before compiling."""
     try:
         user_id = runtime.context.get("user_id")
         data = await qc_request(
@@ -169,19 +200,13 @@ async def check_syntax(
         return format_error(f"Failed to check syntax: {str(e)}")
 
 
-@tool
+@tool(args_schema=UpdateCodeToPep8Input)
 async def update_code_to_pep8(
     code: str,
     runtime: ToolRuntime[Context],
     file_name: str = "main.py",
 ) -> str:
-    """
-    Format Python code to PEP8 standards.
-
-    Args:
-        code: Code to format
-        file_name: Name of the file (default: main.py)
-    """
+    """Format Python code to PEP8 standards."""
     try:
         user_id = runtime.context.get("user_id")
         data = await qc_request(
@@ -204,17 +229,12 @@ async def update_code_to_pep8(
         return format_error(f"Failed to format code to PEP8: {str(e)}")
 
 
-@tool
+@tool(args_schema=SearchQuantconnectInput)
 async def search_quantconnect(
     query: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Search QuantConnect documentation and examples.
-
-    Args:
-        query: Search query
-    """
+    """Search QuantConnect documentation and examples."""
     try:
         user_id = runtime.context.get("user_id")
         # Use QC's structured search format with criteria
@@ -256,19 +276,13 @@ async def _generate_embedding(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-@tool
+@tool(args_schema=SearchLocalAlgorithmsInput)
 async def search_local_algorithms(
     query: str,
     runtime: ToolRuntime[Context],
     limit: int = 5,
 ) -> str:
-    """
-    Search ~1,500 QuantConnect algorithms using semantic search.
-
-    Args:
-        query: Semantic search query
-        limit: Number of results (default: 5, max: 10)
-    """
+    """Search ~1,500 QuantConnect algorithms using semantic search."""
     try:
         if not query:
             return format_error("query is required.")
@@ -317,17 +331,12 @@ async def search_local_algorithms(
         return format_error(f"Failed to search: {str(e)}")
 
 
-@tool
+@tool(args_schema=GetAlgorithmCodeInput)
 async def get_algorithm_code(
     algorithm_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Get full code of an algorithm from the knowledge base.
-
-    Args:
-        algorithm_id: The ID or file_path from search results
-    """
+    """Get full code of an algorithm from the knowledge base."""
     try:
         if not algorithm_id:
             return format_error("algorithm_id is required.")

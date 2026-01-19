@@ -5,15 +5,28 @@ import json
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 
 
+# ============================================================================
+# Input Schemas
+# ============================================================================
+
+class ReadCompileInput(BaseModel):
+    """Input schema for read_compile tool."""
+    compile_id: str = Field(description="The compile ID to check status for")
+
+
+# ============================================================================
+# Tools
+# ============================================================================
+
 @tool
 async def create_compile(runtime: ToolRuntime[Context]) -> str:
-    """
-    Compile the current project on QuantConnect.
+    """Compile the current project on QuantConnect.
     Returns the compile ID needed for backtests and optimizations.
     """
     try:
@@ -60,7 +73,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
                 "status": "Compilation successful",
                 "success": True,
             }, message={"id": runtime.tool_call_id})
-            
+
             return json.dumps(
                 {
                     "success": True,
@@ -71,7 +84,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
             )
         elif state == "BuildError":
             logs = result.get("logs", [])
-            
+
             # Emit error UI
             push_ui_message("compile-status", {
                 "compileId": compile_id,
@@ -80,7 +93,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
                 "success": False,
                 "errors": logs[:5] if logs else [],
             }, message={"id": runtime.tool_call_id})
-            
+
             return json.dumps(
                 {
                     "error": True,
@@ -97,7 +110,7 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
                 "state": state,
                 "status": f"Compile state: {state}",
             }, message={"id": runtime.tool_call_id})
-            
+
             return json.dumps(
                 {
                     "success": True,
@@ -111,17 +124,12 @@ async def create_compile(runtime: ToolRuntime[Context]) -> str:
         return json.dumps({"error": True, "message": f"Failed to compile: {e!s}"})
 
 
-@tool
+@tool(args_schema=ReadCompileInput)
 async def read_compile(
     compile_id: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Read compile status and logs.
-
-    Args:
-        compile_id: The compile ID to check
-    """
+    """Read compile status and logs for a given compile ID."""
     try:
         qc_project_id = runtime.context.get("qc_project_id")
         user_id = runtime.context.get("user_id")
