@@ -263,17 +263,26 @@ async function ensureLeanStaticData(): Promise<void> {
 
 /**
  * Create LEAN config.json for the backtest
+ * Parameters are passed to LEAN and can be accessed via self.get_parameter() in the algorithm
  */
 function createLeanConfig(
   startDate: Date,
   endDate: Date,
-  cash: number
+  cash: number,
+  parameters: Record<string, unknown> = {}
 ): object {
   // Note: These paths are INSIDE the Docker container, not host paths
   // The Docker volumes map:
   //   hostAlgorithmDir -> /Algorithm
   //   hostDataDir -> /Data
   //   hostResultsDir -> /Results
+
+  // Convert parameters to LEAN format (all values as strings)
+  const leanParameters: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parameters)) {
+    leanParameters[key] = String(value);
+  }
+
   return {
     'environment': 'backtesting',
     'algorithm-type-name': 'main',
@@ -293,7 +302,7 @@ function createLeanConfig(
     'alpha-handler': 'QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler',
     'data-channel-provider': 'DataChannelProvider',
     'log-handler': 'QuantConnect.Logging.CompositeLogHandler',
-    'parameters': {},
+    'parameters': leanParameters,
     'close-automatically': true,
     'start-date': startDate.toISOString().split('T')[0],
     'end-date': endDate.toISOString().split('T')[0],
@@ -553,7 +562,8 @@ async function runLeanBacktest(
     await onProgress(40);
 
     // Create LEAN config (uses container paths, not host paths)
-    const config = createLeanConfig(startDate, endDate, cash);
+    // Parameters are injected here and accessible via self.get_parameter() in the algorithm
+    const config = createLeanConfig(startDate, endDate, cash, parameters);
     const configPath = path.join(tempBase, 'config.json');
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 

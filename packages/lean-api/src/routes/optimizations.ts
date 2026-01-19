@@ -7,7 +7,7 @@
  */
 
 import { Router, type IRouter } from 'express';
-import { query, queryOne, execute } from '../services/database.js';
+import { query, queryOne, execute, transaction, clientQueryOne } from '../services/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
 import type {
@@ -280,6 +280,55 @@ router.post('/create', async (req, res) => {
       });
     }
 
+    // Validate each parameter
+    for (let i = 0; i < parameters.length; i++) {
+      const param = parameters[i];
+      if (!param.name || typeof param.name !== 'string') {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}].name must be a non-empty string`],
+        });
+      }
+      if (typeof param.min !== 'number' || isNaN(param.min)) {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}].min must be a valid number`],
+        });
+      }
+      if (typeof param.max !== 'number' || isNaN(param.max)) {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}].max must be a valid number`],
+        });
+      }
+      if (typeof param.step !== 'number' || isNaN(param.step) || param.step <= 0) {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}].step must be a positive number`],
+        });
+      }
+      if (param.min >= param.max) {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}].min must be less than max`],
+        });
+      }
+      // Check step doesn't create too many combinations
+      const steps = Math.floor((param.max - param.min) / param.step) + 1;
+      if (steps > 100) {
+        return res.status(400).json({
+          success: false,
+          optimization: null,
+          errors: [`parameters[${i}] creates ${steps} steps, maximum is 100 per parameter`],
+        });
+      }
+    }
+
     if (typeof projectId !== 'number' || projectId < 1) {
       return res.status(400).json({
         success: false,
@@ -305,38 +354,55 @@ router.post('/create', async (req, res) => {
       totalBacktests *= steps;
     }
 
+    // Limit total backtests to prevent runaway optimizations
+    const MAX_TOTAL_BACKTESTS = 1000;
+    if (totalBacktests > MAX_TOTAL_BACKTESTS) {
+      return res.status(400).json({
+        success: false,
+        optimization: null,
+        errors: [`Total backtests (${totalBacktests}) exceeds maximum of ${MAX_TOTAL_BACKTESTS}. Reduce parameter ranges or increase step sizes.`],
+      });
+    }
+
     const optimizationId = uuidv4();
     const startDate = new Date('2023-01-01');
     const endDate = new Date('2024-01-01');
     const cash = 100000;
 
-    const optimization = await queryOne<LeanOptimization>(
-      `INSERT INTO lean_optimizations
-       (optimization_id, project_id, user_id, name, status, parameters, target, start_date, end_date, cash, total_backtests)
-       VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [optimizationId, internalProjectId, userId, name, JSON.stringify(parameters), target || 'SharpeRatio', startDate, endDate, cash, totalBacktests]
-    );
+    // Use transaction to ensure DB insert + queue add are atomic
+    const optimization = await transaction(async (client) => {
+      const txQueryOne = clientQueryOne<LeanOptimization>(client);
 
-    if (!optimization) {
-      throw new Error('Failed to create optimization record');
-    }
+      const newOptimization = await txQueryOne(
+        `INSERT INTO lean_optimizations
+         (optimization_id, project_id, user_id, name, status, parameters, target, start_date, end_date, cash, total_backtests)
+         VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [optimizationId, internalProjectId, userId, name, JSON.stringify(parameters), target || 'SharpeRatio', startDate, endDate, cash, totalBacktests]
+      );
 
-    // Queue the optimization job
-    const queue = getOptimizationQueue();
-    await queue.add('optimization', {
-      optimizationId,
-      projectId: internalProjectId,
-      userId,
-      parameters,
-      target: target || 'SharpeRatio',
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      cash,
-    }, {
-      jobId: optimizationId,
-      removeOnComplete: true,
-      removeOnFail: false,
+      if (!newOptimization) {
+        throw new Error('Failed to create optimization record');
+      }
+
+      // Queue the optimization job (inside transaction so failure rolls back DB insert)
+      const queue = getOptimizationQueue();
+      await queue.add('optimization', {
+        optimizationId,
+        projectId: internalProjectId,
+        userId,
+        parameters,
+        target: target || 'SharpeRatio',
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        cash,
+      }, {
+        jobId: optimizationId,
+        removeOnComplete: true,
+        removeOnFail: false,
+      });
+
+      return newOptimization;
     });
 
     res.json({

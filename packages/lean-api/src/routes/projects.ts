@@ -6,7 +6,7 @@
  */
 
 import { Router, type IRouter } from 'express';
-import { query, queryOne, execute } from '../services/database.js';
+import { query, queryOne, execute, transaction, clientQueryOne, clientExecute } from '../services/database.js';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
 import type {
   QCProjectsResponse,
@@ -145,18 +145,7 @@ router.post('/create', async (req, res) => {
       return res.status(400).json(response);
     }
 
-    const project = await queryOne<LeanProject>(
-      `INSERT INTO lean_projects (user_id, name, language)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [userId, name, language]
-    );
-
-    if (!project) {
-      throw new Error('Failed to create project - no record returned');
-    }
-
-    // Create default main.py file with multi-asset template
+    // Use transaction to ensure project + default file creation are atomic
     const className = name.replace(/[^a-zA-Z0-9]/g, '') || 'MyStrategy';
     const defaultCode = `# region imports
 from AlgorithmImports import *
@@ -189,11 +178,31 @@ class ${className}Algorithm(QCAlgorithm):
             self.set_holdings("AAPL", 0.33)
 `;
 
-    await execute(
-      `INSERT INTO lean_files (project_id, name, content, is_main)
-       VALUES ($1, $2, $3, true)`,
-      [project.id, 'main.py', defaultCode]
-    );
+    const project = await transaction(async (client) => {
+      const txQueryOne = clientQueryOne<LeanProject>(client);
+      const txExecute = clientExecute(client);
+
+      // Create the project
+      const newProject = await txQueryOne(
+        `INSERT INTO lean_projects (user_id, name, language)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [userId, name, language]
+      );
+
+      if (!newProject) {
+        throw new Error('Failed to create project - no record returned');
+      }
+
+      // Create default main.py file
+      await txExecute(
+        `INSERT INTO lean_files (project_id, name, content, is_main)
+         VALUES ($1, $2, $3, true)`,
+        [newProject.id, 'main.py', defaultCode]
+      );
+
+      return newProject;
+    });
 
     const response: QCProjectCreateResponse = {
       success: true,

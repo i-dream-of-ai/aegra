@@ -76,6 +76,32 @@ export async function transaction<T>(
   }
 }
 
+/**
+ * Transaction-aware query helpers for use within transaction callbacks
+ * These use the client passed to the transaction callback instead of the pool
+ */
+export function clientQuery<T>(client: pg.PoolClient) {
+  return async (text: string, params?: unknown[]): Promise<T[]> => {
+    const result = await client.query(text, params);
+    return result.rows.map(row => transformRow<T>(row));
+  };
+}
+
+export function clientQueryOne<T>(client: pg.PoolClient) {
+  return async (text: string, params?: unknown[]): Promise<T | null> => {
+    const result = await client.query(text, params);
+    if (!result.rows[0]) return null;
+    return transformRow<T>(result.rows[0]);
+  };
+}
+
+export function clientExecute(client: pg.PoolClient) {
+  return async (text: string, params?: unknown[]): Promise<number> => {
+    const result = await client.query(text, params);
+    return result.rowCount || 0;
+  };
+}
+
 // Health check - returns both status and error for proper logging
 export async function checkHealth(): Promise<{ healthy: boolean; error?: string }> {
   try {

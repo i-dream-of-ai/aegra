@@ -8,7 +8,7 @@
  */
 
 import { Router, type IRouter } from 'express';
-import { query, queryOne, execute } from '../services/database.js';
+import { query, queryOne, execute, transaction, clientQueryOne } from '../services/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
 import type {
@@ -248,32 +248,40 @@ router.post('/create', async (req, res) => {
     const endDate = new Date('2024-01-01');
     const cash = 100000;
 
-    const backtest = await queryOne<LeanBacktest>(
-      `INSERT INTO lean_backtests
-       (backtest_id, project_id, user_id, name, status, start_date, end_date, cash)
-       VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
-       RETURNING *`,
-      [backtestId, internalProjectId, userId, backtestName, startDate, endDate, cash]
-    );
+    // Use transaction to ensure DB insert + queue add are atomic
+    // If queue add fails, DB insert is rolled back
+    const backtest = await transaction(async (client) => {
+      const txQueryOne = clientQueryOne<LeanBacktest>(client);
 
-    if (!backtest) {
-      throw new Error('Failed to create backtest record - INSERT returned no rows');
-    }
+      const newBacktest = await txQueryOne(
+        `INSERT INTO lean_backtests
+         (backtest_id, project_id, user_id, name, status, start_date, end_date, cash)
+         VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
+         RETURNING *`,
+        [backtestId, internalProjectId, userId, backtestName, startDate, endDate, cash]
+      );
 
-    // Queue the backtest job
-    const queue = getBacktestQueue();
-    await queue.add('backtest', {
-      backtestId,
-      projectId: internalProjectId,
-      userId,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      cash,
-      parameters: {},
-    }, {
-      jobId: backtestId,
-      removeOnComplete: true,
-      removeOnFail: false,
+      if (!newBacktest) {
+        throw new Error('Failed to create backtest record - INSERT returned no rows');
+      }
+
+      // Queue the backtest job (inside transaction so failure rolls back DB insert)
+      const queue = getBacktestQueue();
+      await queue.add('backtest', {
+        backtestId,
+        projectId: internalProjectId,
+        userId,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        cash,
+        parameters: {},
+      }, {
+        jobId: backtestId,
+        removeOnComplete: true,
+        removeOnFail: false,
+      });
+
+      return newBacktest;
     });
 
     // Return full backtest object like QC does
