@@ -183,8 +183,10 @@ function createLeanConfig(
     'messaging-handler': 'QuantConnect.Messaging.Messaging',
     'job-queue-handler': 'QuantConnect.Queues.JobQueue',
     'api-handler': 'QuantConnect.Api.Api',
-    'map-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider',
-    'factor-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider',
+    // Use LocalZipMapFileProvider which doesn't require map_files directory on disk
+    // This avoids errors when running without full QC data infrastructure
+    'map-file-provider': 'QuantConnect.Data.Auxiliary.LocalZipMapFileProvider',
+    'factor-file-provider': 'QuantConnect.Data.Auxiliary.LocalZipFactorFileProvider',
     'data-provider': 'QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider',
     'alpha-handler': 'QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler',
     'data-channel-provider': 'DataChannelProvider',
