@@ -23,32 +23,40 @@ import type {
   BacktestsDeleteRequest,
   BacktestsChartReadRequest,
 } from '../types/index.js';
-import type { LeanBacktest, LeanProject } from '../types/index.js';
+import type { Backtest } from '../types/index.js';
 import { getBacktestQueue } from '../workers/queue.js';
 
 const router: IRouter = Router();
 
+interface ProjectLookup {
+  internalId: number;
+  qcProjectId: number;
+}
+
 /**
  * Look up project by QC project ID and verify ownership
  * Uses the main 'projects' table which has qc_project_id
- * Returns internal project id if found, null otherwise
+ * Returns { internalId, qcProjectId } if found, null otherwise
  */
-async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
-  // First try: look up by qc_project_id in main projects table
-  const project = await queryOne<{ id: number }>(
-    'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
+async function getProjectByQcId(qcProjectId: number, userId: string): Promise<ProjectLookup | null> {
+  // Look up by qc_project_id in projects table
+  const project = await queryOne<{ id: number; qcProjectId: string | null }>(
+    'SELECT id, qc_project_id as "qcProjectId" FROM projects WHERE qc_project_id = $1 AND user_id = $2',
     [String(qcProjectId), userId]
   );
   if (project) {
-    return project.id;
+    return { internalId: project.id, qcProjectId: Number(project.qcProjectId) || qcProjectId };
   }
 
-  // Fallback: maybe it's already an internal id in lean_projects
-  const leanProject = await queryOne<{ id: number }>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+  // Fallback: maybe it's the internal project id directly
+  const directProject = await queryOne<{ id: number; qcProjectId: string | null }>(
+    'SELECT id, qc_project_id as "qcProjectId" FROM projects WHERE id = $1 AND user_id = $2',
     [qcProjectId, userId]
   );
-  return leanProject?.id || null;
+  if (directProject) {
+    return { internalId: directProject.id, qcProjectId: Number(directProject.qcProjectId) || qcProjectId };
+  }
+  return null;
 }
 
 /**
@@ -69,7 +77,7 @@ function mapStatus(status: string): string {
  * Matches QuantConnect API response structure exactly
  * Uses real statistics from LEAN results, no hardcoded values
  */
-function toQCBacktest(bt: LeanBacktest) {
+function toQCBacktest(bt: Backtest) {
   // Ensure numeric values (DB may return strings for numeric columns)
   const netProfit = Number(bt.netProfit) || 0;
   const cagr = Number(bt.cagr) || 0;
@@ -180,7 +188,7 @@ function toQCBacktest(bt: LeanBacktest) {
   };
 
   return {
-    backtestId: bt.backtestId,
+    backtestId: bt.qcBacktestId,
     projectId: bt.projectId,
     name: bt.name,
     note: bt.note || undefined,
@@ -234,8 +242,8 @@ router.post('/create', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         backtest: null,
@@ -251,14 +259,14 @@ router.post('/create', async (req, res) => {
     // Use transaction to ensure DB insert + queue add are atomic
     // If queue add fails, DB insert is rolled back
     const backtest = await transaction(async (client) => {
-      const txQueryOne = clientQueryOne<LeanBacktest>(client);
+      const txQueryOne = clientQueryOne<Backtest>(client);
 
       const newBacktest = await txQueryOne(
-        `INSERT INTO lean_backtests
-         (backtest_id, project_id, user_id, name, status, start_date, end_date, cash)
-         VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
+        `INSERT INTO qc_backtests
+         (qc_backtest_id, qc_project_id, project_id, user_id, name, status, start_date, end_date, cash, source)
+         VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8, 'self_hosted')
          RETURNING *`,
-        [backtestId, internalProjectId, userId, backtestName, startDate, endDate, cash]
+        [backtestId, projectLookup.qcProjectId, projectLookup.internalId, userId, backtestName, startDate, endDate, cash]
       );
 
       if (!newBacktest) {
@@ -269,7 +277,7 @@ router.post('/create', async (req, res) => {
       const queue = getBacktestQueue();
       await queue.add('backtest', {
         backtestId,
-        projectId: internalProjectId,
+        projectId: projectLookup.internalId,
         userId,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
@@ -320,8 +328,8 @@ router.post('/list', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         backtests: [],
@@ -329,9 +337,9 @@ router.post('/list', async (req, res) => {
       });
     }
 
-    const backtests = await query<LeanBacktest>(
-      'SELECT * FROM lean_backtests WHERE project_id = $1 ORDER BY created_at DESC',
-      [internalProjectId]
+    const backtests = await query<Backtest>(
+      'SELECT * FROM qc_backtests WHERE project_id = $1 ORDER BY created_at DESC',
+      [projectLookup.internalId]
     );
 
     res.json({
@@ -377,8 +385,8 @@ router.post('/read', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         backtest: null,
@@ -386,9 +394,9 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT * FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (!backtest) {
@@ -439,8 +447,8 @@ router.post('/update', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         backtest: null,
@@ -470,9 +478,9 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    values.push(internalProjectId, backtestId);
+    values.push(projectLookup.internalId, backtestId);
     const updated = await execute(
-      `UPDATE lean_backtests SET ${updates.join(', ')} WHERE project_id = $${paramIndex++} AND backtest_id = $${paramIndex}`,
+      `UPDATE qc_backtests SET ${updates.join(', ')} WHERE project_id = $${paramIndex++} AND qc_backtest_id = $${paramIndex}`,
       values
     );
 
@@ -485,9 +493,9 @@ router.post('/update', async (req, res) => {
     }
 
     // Fetch updated backtest
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT * FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     res.json({
@@ -524,8 +532,8 @@ router.post('/delete', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         errors: ['Project not found or access denied'],
@@ -533,8 +541,8 @@ router.post('/delete', async (req, res) => {
     }
 
     const deleted = await execute(
-      'DELETE FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+      'DELETE FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (deleted === 0) {
@@ -576,8 +584,8 @@ router.post('/abort', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         errors: ['Project not found or access denied'],
@@ -585,9 +593,9 @@ router.post('/abort', async (req, res) => {
     }
 
     // Check backtest exists and is running
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT * FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (!backtest) {
@@ -606,8 +614,8 @@ router.post('/abort', async (req, res) => {
 
     // Update status to aborted
     await execute(
-      "UPDATE lean_backtests SET status = 'error', completed_at = NOW(), error_message = 'Aborted by user' WHERE project_id = $1 AND backtest_id = $2",
-      [internalProjectId, backtestId]
+      "UPDATE qc_backtests SET status = 'error', completed_at = NOW(), error_message = 'Aborted by user' WHERE project_id = $1 AND qc_backtest_id = $2",
+      [projectLookup.internalId, backtestId]
     );
 
     // Try to remove from queue if still queued
@@ -655,8 +663,8 @@ router.post('/orders/read', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         orders: [],
@@ -664,9 +672,9 @@ router.post('/orders/read', async (req, res) => {
       });
     }
 
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT result_json FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT result_json FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (!backtest) {
@@ -724,8 +732,8 @@ router.post('/read/insights', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         insights: [],
@@ -733,9 +741,9 @@ router.post('/read/insights', async (req, res) => {
       });
     }
 
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT result_json FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT result_json FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (!backtest) {
@@ -801,8 +809,8 @@ router.post('/chart/read', async (req, res) => {
     }
 
     // Look up internal project id from QC project id
-    const internalProjectId = await getProjectByQcId(projectId, userId);
-    if (!internalProjectId) {
+    const projectLookup = await getProjectByQcId(projectId, userId);
+    if (!projectLookup) {
       return res.status(404).json({
         success: false,
         chart: {},
@@ -810,9 +818,9 @@ router.post('/chart/read', async (req, res) => {
       });
     }
 
-    const backtest = await queryOne<LeanBacktest>(
-      'SELECT rolling_window, status FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
-      [internalProjectId, backtestId]
+    const backtest = await queryOne<Backtest>(
+      'SELECT rolling_window, status FROM qc_backtests WHERE project_id = $1 AND qc_backtest_id = $2',
+      [projectLookup.internalId, backtestId]
     );
 
     if (!backtest) {
@@ -859,10 +867,10 @@ router.get('/stream/:backtestId', async (req, res) => {
 
   try {
     // First verify the backtest exists and belongs to this user
-    const backtest = await queryOne<LeanBacktest>(
-      `SELECT lb.* FROM lean_backtests lb
+    const backtest = await queryOne<Backtest>(
+      `SELECT lb.* FROM qc_backtests lb
        JOIN projects p ON lb.project_id = p.id
-       WHERE lb.backtest_id = $1 AND p.user_id = $2`,
+       WHERE lb.qc_backtest_id = $1 AND p.user_id = $2`,
       [backtestId, userId]
     );
 
@@ -901,8 +909,8 @@ router.get('/stream/:backtestId', async (req, res) => {
 
     // Polling function to check backtest status
     const pollBacktest = async () => {
-      const current = await queryOne<LeanBacktest>(
-        'SELECT * FROM lean_backtests WHERE backtest_id = $1',
+      const current = await queryOne<Backtest>(
+        'SELECT * FROM qc_backtests WHERE qc_backtest_id = $1',
         [backtestId]
       );
 
@@ -926,7 +934,7 @@ router.get('/stream/:backtestId', async (req, res) => {
 
       sendEvent({
         type: 'progress',
-        backtestId: current.backtestId,
+        backtestId: current.qcBacktestId,
         backtestName: current.name,
         status: current.status,
         progress: (current.progress || 0) / 100, // Normalize to 0-1

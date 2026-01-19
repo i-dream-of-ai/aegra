@@ -78,13 +78,13 @@ router.post('/read', async (req, res) => {
 
     if (projectId) {
       const project = await queryOne<LeanProject>(
-        'SELECT * FROM lean_projects WHERE id = $1 AND user_id = $2',
+        'SELECT * FROM projects WHERE id = $1 AND user_id = $2',
         [projectId, userId]
       );
       projects = project ? [project] : [];
     } else {
       projects = await query<LeanProject>(
-        'SELECT * FROM lean_projects WHERE user_id = $1 ORDER BY modified_at DESC',
+        'SELECT * FROM projects WHERE user_id = $1 ORDER BY modified_at DESC',
         [userId]
       );
     }
@@ -184,7 +184,7 @@ class ${className}Algorithm(QCAlgorithm):
 
       // Create the project
       const newProject = await txQueryOne(
-        `INSERT INTO lean_projects (user_id, name, language)
+        `INSERT INTO projects (user_id, name, language)
          VALUES ($1, $2, $3)
          RETURNING *`,
         [userId, name, language]
@@ -196,7 +196,7 @@ class ${className}Algorithm(QCAlgorithm):
 
       // Create default main.py file
       await txExecute(
-        `INSERT INTO lean_files (project_id, name, content, is_main)
+        `INSERT INTO project_files (project_id, name, content, is_main)
          VALUES ($1, $2, $3, true)`,
         [newProject.id, 'main.py', defaultCode]
       );
@@ -279,7 +279,7 @@ router.post('/update', async (req, res) => {
     values.push(projectId, userId);
 
     const project = await queryOne<LeanProject>(
-      `UPDATE lean_projects SET ${updates.join(', ')}
+      `UPDATE projects SET ${updates.join(', ')}
        WHERE id = $${paramIndex++} AND user_id = $${paramIndex}
        RETURNING *`,
       values
@@ -362,7 +362,7 @@ router.post('/delete', async (req, res) => {
 
     // Verify ownership and delete (CASCADE will handle files and backtests)
     const deleted = await execute(
-      'DELETE FROM lean_projects WHERE id = $1 AND user_id = $2',
+      'DELETE FROM projects WHERE id = $1 AND user_id = $2',
       [projectId, userId]
     );
 

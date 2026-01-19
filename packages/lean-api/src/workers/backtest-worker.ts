@@ -844,7 +844,7 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
 
   const updateProgress = async (progress: number) => {
     await execute(
-      'UPDATE lean_backtests SET progress = $2 WHERE backtest_id = $1',
+      'UPDATE qc_backtests SET progress = $2 WHERE qc_backtest_id = $1',
       [backtestId, progress]
     );
   };
@@ -852,14 +852,14 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
   try {
     // Update status to running
     await execute(
-      `UPDATE lean_backtests SET status = 'running', started_at = NOW(), progress = 0
-       WHERE backtest_id = $1`,
+      `UPDATE qc_backtests SET status = 'running', started_at = NOW(), progress = 0
+       WHERE qc_backtest_id = $1`,
       [backtestId]
     );
 
     // Get algorithm files
     const files = await query<LeanFile>(
-      'SELECT * FROM lean_files WHERE project_id = $1',
+      'SELECT * FROM project_files WHERE project_id = $1',
       [projectId]
     );
 
@@ -914,7 +914,7 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
     // Store results with comprehensive statistics
     const stats = result.stats!;
     await execute(
-      `UPDATE lean_backtests SET
+      `UPDATE qc_backtests SET
          status = 'completed',
          completed_at = NOW(),
          progress = 100,
@@ -941,7 +941,7 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
          average_win = $22,
          average_loss = $23,
          end_equity = $24
-       WHERE backtest_id = $1`,
+       WHERE qc_backtest_id = $1`,
       [
         backtestId,
         stats.netProfit,
@@ -976,11 +976,11 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
 
     // Update status to error
     await execute(
-      `UPDATE lean_backtests SET
+      `UPDATE qc_backtests SET
          status = 'error',
          completed_at = NOW(),
          error_message = $2
-       WHERE backtest_id = $1`,
+       WHERE qc_backtest_id = $1`,
       [backtestId, (error as Error).message]
     );
 

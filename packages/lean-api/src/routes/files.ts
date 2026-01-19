@@ -15,7 +15,7 @@ import type {
   FilesReadRequest,
   FilesUpdateRequest,
 } from '../types/index.js';
-import type { LeanFile, LeanProject } from '../types/index.js';
+import type { ProjectFile } from '../types/index.js';
 
 /**
  * Request types matching QC API exactly
@@ -52,7 +52,7 @@ const router = Router();
  * Convert internal file to QC format
  * Matches QuantConnect API response structure exactly
  */
-function toQCFile(file: LeanFile) {
+function toQCFile(file: ProjectFile) {
   return {
     id: file.id,
     projectId: file.projectId,
@@ -70,7 +70,7 @@ function toQCFile(file: LeanFile) {
  * Returns internal project id if found, null otherwise
  */
 async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
-  // First try: look up by qc_project_id in main projects table
+  // Look up by qc_project_id in projects table
   const project = await queryOne<{ id: number }>(
     'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
     [String(qcProjectId), userId]
@@ -79,12 +79,12 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
     return project.id;
   }
 
-  // Fallback: maybe it's already an internal id in lean_projects
-  const leanProject = await queryOne<{ id: number }>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+  // Fallback: maybe it's the internal project id directly
+  const directProject = await queryOne<{ id: number }>(
+    'SELECT id FROM projects WHERE id = $1 AND user_id = $2',
     [qcProjectId, userId]
   );
-  return leanProject?.id || null;
+  return directProject?.id || null;
 }
 
 /**
@@ -152,8 +152,8 @@ router.post('/create', async (req: Request, res: Response) => {
     }
 
     // Check if file already exists
-    const existing = await queryOne<LeanFile>(
-      'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+    const existing = await queryOne<ProjectFile>(
+      'SELECT * FROM project_files WHERE project_id = $1 AND name = $2',
       [internalProjectId, name]
     );
 
@@ -168,8 +168,8 @@ router.post('/create', async (req: Request, res: Response) => {
     const isMain = name.toLowerCase() === 'main.py';
     const fileContent = content || '';
 
-    const file = await queryOne<LeanFile>(
-      `INSERT INTO lean_files (project_id, name, content, is_main)
+    const file = await queryOne<ProjectFile>(
+      `INSERT INTO project_files (project_id, name, content, is_main)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
       [internalProjectId, name, fileContent, isMain]
@@ -243,17 +243,17 @@ router.post('/read', async (req: Request, res: Response) => {
       return res.status(404).json(response);
     }
 
-    let files: LeanFile[];
+    let files: ProjectFile[];
 
     // Handle wildcard "*" to return all files (same as no name provided)
     if (!name || name === '*') {
-      files = await query<LeanFile>(
-        'SELECT * FROM lean_files WHERE project_id = $1 ORDER BY name',
+      files = await query<ProjectFile>(
+        'SELECT * FROM project_files WHERE project_id = $1 ORDER BY name',
         [internalProjectId]
       );
     } else {
-      const file = await queryOne<LeanFile>(
-        'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+      const file = await queryOne<ProjectFile>(
+        'SELECT * FROM project_files WHERE project_id = $1 AND name = $2',
         [internalProjectId, name]
       );
       files = file ? [file] : [];
@@ -377,8 +377,8 @@ router.post('/update', async (req: Request, res: Response) => {
     }
 
     // Check if file exists
-    const existingFile = await queryOne<LeanFile>(
-      'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+    const existingFile = await queryOne<ProjectFile>(
+      'SELECT * FROM project_files WHERE project_id = $1 AND name = $2',
       [internalProjectId, name]
     );
 
@@ -390,13 +390,13 @@ router.post('/update', async (req: Request, res: Response) => {
       });
     }
 
-    let file: LeanFile | null = null;
+    let file: ProjectFile | null = null;
 
     // Handle rename operation
     if (newName !== undefined && newName !== name) {
       // Check if target name already exists
-      const targetExists = await queryOne<LeanFile>(
-        'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
+      const targetExists = await queryOne<ProjectFile>(
+        'SELECT * FROM project_files WHERE project_id = $1 AND name = $2',
         [internalProjectId, newName]
       );
 
@@ -411,8 +411,8 @@ router.post('/update', async (req: Request, res: Response) => {
       const isMain = newName.toLowerCase() === 'main.py';
 
       // Update with new name and optionally new content
-      file = await queryOne<LeanFile>(
-        `UPDATE lean_files
+      file = await queryOne<ProjectFile>(
+        `UPDATE project_files
          SET name = $1, is_main = $2, modified_at = NOW()${content !== undefined ? ', content = $4' : ''}
          WHERE project_id = $3 AND name = $5
          RETURNING *`,
@@ -422,8 +422,8 @@ router.post('/update', async (req: Request, res: Response) => {
       );
     } else if (content !== undefined) {
       // Content-only update
-      file = await queryOne<LeanFile>(
-        `UPDATE lean_files
+      file = await queryOne<ProjectFile>(
+        `UPDATE project_files
          SET content = $1, modified_at = NOW()
          WHERE project_id = $2 AND name = $3
          RETURNING *`,
@@ -493,7 +493,7 @@ router.post('/delete', async (req: Request, res: Response) => {
     }
 
     const deleted = await execute(
-      'DELETE FROM lean_files WHERE project_id = $1 AND name = $2',
+      'DELETE FROM project_files WHERE project_id = $1 AND name = $2',
       [internalProjectId, name]
     );
 

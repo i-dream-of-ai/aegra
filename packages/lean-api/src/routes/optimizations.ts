@@ -16,7 +16,7 @@ import type {
   OptimizationsListRequest,
   OptimizationsReadRequest,
 } from '../types/index.js';
-import type { LeanOptimization, LeanProject } from '../types/index.js';
+import type { Optimization } from '../types/index.js';
 import { getOptimizationQueue } from '../workers/queue.js';
 
 const router: IRouter = Router();
@@ -27,7 +27,7 @@ const router: IRouter = Router();
  * Returns internal project id if found, null otherwise
  */
 async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
-  // First try: look up by qc_project_id in main projects table
+  // Look up by qc_project_id in projects table
   const project = await queryOne<{ id: number }>(
     'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
     [String(qcProjectId), userId]
@@ -36,18 +36,18 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
     return project.id;
   }
 
-  // Fallback: maybe it's already an internal id in lean_projects
-  const leanProject = await queryOne<{ id: number }>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+  // Fallback: maybe it's the internal project id directly
+  const directProject = await queryOne<{ id: number }>(
+    'SELECT id FROM projects WHERE id = $1 AND user_id = $2',
     [qcProjectId, userId]
   );
-  return leanProject?.id || null;
+  return directProject?.id || null;
 }
 
 /**
  * Convert internal optimization to QC format
  */
-function toQCOptimization(opt: LeanOptimization) {
+function toQCOptimization(opt: Optimization) {
   // Map internal status to QC status
   const statusMap: Record<string, 'New' | 'Running' | 'Completed' | 'Error' | 'Aborted'> = {
     'queued': 'New',
@@ -133,8 +133,8 @@ router.post('/list', async (req, res) => {
       });
     }
 
-    const optimizations = await query<LeanOptimization>(
-      'SELECT * FROM lean_optimizations WHERE project_id = $1 ORDER BY created_at DESC',
+    const optimizations = await query<Optimization>(
+      'SELECT * FROM optimizations WHERE project_id = $1 ORDER BY created_at DESC',
       [internalProjectId]
     );
 
@@ -198,8 +198,8 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    const optimization = await queryOne<LeanOptimization>(
-      'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+    const optimization = await queryOne<Optimization>(
+      'SELECT * FROM optimizations WHERE project_id = $1 AND optimization_id = $2',
       [internalProjectId, optimizationId]
     );
 
@@ -371,10 +371,10 @@ router.post('/create', async (req, res) => {
 
     // Use transaction to ensure DB insert + queue add are atomic
     const optimization = await transaction(async (client) => {
-      const txQueryOne = clientQueryOne<LeanOptimization>(client);
+      const txQueryOne = clientQueryOne<Optimization>(client);
 
       const newOptimization = await txQueryOne(
-        `INSERT INTO lean_optimizations
+        `INSERT INTO optimizations
          (optimization_id, project_id, user_id, name, status, parameters, target, start_date, end_date, cash, total_backtests)
          VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8, $9, $10)
          RETURNING *`,
@@ -524,7 +524,7 @@ router.post('/update', async (req, res) => {
     }
 
     const updated = await execute(
-      'UPDATE lean_optimizations SET name = $1 WHERE project_id = $2 AND optimization_id = $3',
+      'UPDATE optimizations SET name = $1 WHERE project_id = $2 AND optimization_id = $3',
       [name, internalProjectId, optimizationId]
     );
 
@@ -537,8 +537,8 @@ router.post('/update', async (req, res) => {
     }
 
     // Fetch updated optimization
-    const optimization = await queryOne<LeanOptimization>(
-      'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+    const optimization = await queryOne<Optimization>(
+      'SELECT * FROM optimizations WHERE project_id = $1 AND optimization_id = $2',
       [internalProjectId, optimizationId]
     );
 
@@ -588,8 +588,8 @@ router.post('/abort', async (req, res) => {
     }
 
     // Check optimization exists and is running
-    const optimization = await queryOne<LeanOptimization>(
-      'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+    const optimization = await queryOne<Optimization>(
+      'SELECT * FROM optimizations WHERE project_id = $1 AND optimization_id = $2',
       [internalProjectId, optimizationId]
     );
 
@@ -609,7 +609,7 @@ router.post('/abort', async (req, res) => {
 
     // Update status to aborted
     await execute(
-      "UPDATE lean_optimizations SET status = 'aborted', completed_at = NOW() WHERE project_id = $1 AND optimization_id = $2",
+      "UPDATE optimizations SET status = 'aborted', completed_at = NOW() WHERE project_id = $1 AND optimization_id = $2",
       [internalProjectId, optimizationId]
     );
 
@@ -666,7 +666,7 @@ router.post('/delete', async (req, res) => {
     }
 
     const deleted = await execute(
-      'DELETE FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+      'DELETE FROM optimizations WHERE project_id = $1 AND optimization_id = $2',
       [internalProjectId, optimizationId]
     );
 

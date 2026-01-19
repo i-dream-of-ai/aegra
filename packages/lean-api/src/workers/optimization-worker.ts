@@ -69,11 +69,12 @@ async function runBacktestWithParameters(
   const name = `Opt-${Object.entries(parameters).map(([k, v]) => `${k}=${v}`).join(',')}`;
 
   // Create backtest record
+  // Note: Need qc_project_id - for optimization backtests, use projectId as the qc_project_id
   await execute(
-    `INSERT INTO lean_backtests
-     (backtest_id, project_id, user_id, name, status, start_date, end_date, cash, parameters)
-     VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8)`,
-    [backtestId, projectId, userId, name, startDate, endDate, cash, JSON.stringify(parameters)]
+    `INSERT INTO qc_backtests
+     (qc_backtest_id, qc_project_id, project_id, user_id, name, status, start_date, end_date, cash, parameters, source)
+     VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8, $9, 'self_hosted')`,
+    [backtestId, projectId, projectId, userId, name, startDate, endDate, cash, JSON.stringify(parameters)]
   );
 
   // Queue the backtest job
@@ -114,7 +115,7 @@ async function runBacktestWithParameters(
       `SELECT status, net_profit as "netProfit", sharpe_ratio as "sharpeRatio",
               cagr, drawdown, total_trades as "totalTrades", win_rate as "winRate",
               error_message as "errorMessage"
-       FROM lean_backtests WHERE backtest_id = $1`,
+       FROM qc_backtests WHERE qc_backtest_id = $1`,
       [backtestId]
     );
 
@@ -158,7 +159,7 @@ async function processOptimization(job: Job<OptimizationJobData>): Promise<void>
   try {
     // Update status to running
     await execute(
-      `UPDATE lean_optimizations SET status = 'running', started_at = NOW()
+      `UPDATE optimizations SET status = 'running', started_at = NOW()
        WHERE optimization_id = $1`,
       [optimizationId]
     );
@@ -192,7 +193,7 @@ async function processOptimization(job: Job<OptimizationJobData>): Promise<void>
       // Update progress
       const progress = (completedCount / totalBacktests) * 100;
       await execute(
-        `UPDATE lean_optimizations SET progress = $2, completed_backtests = $3
+        `UPDATE optimizations SET progress = $2, completed_backtests = $3
          WHERE optimization_id = $1`,
         [optimizationId, progress, completedCount]
       );
@@ -218,7 +219,7 @@ async function processOptimization(job: Job<OptimizationJobData>): Promise<void>
 
     // Store results
     await execute(
-      `UPDATE lean_optimizations SET
+      `UPDATE optimizations SET
          status = 'completed',
          completed_at = NOW(),
          progress = 100,
@@ -243,7 +244,7 @@ async function processOptimization(job: Job<OptimizationJobData>): Promise<void>
 
     // Update status to error
     await execute(
-      `UPDATE lean_optimizations SET
+      `UPDATE optimizations SET
          status = 'error',
          completed_at = NOW(),
          error_message = $2

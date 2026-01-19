@@ -1,17 +1,13 @@
 export * from './qc-api.js';
 
 // Internal types for the LEAN API service
+// These match the consolidated database schema
 
-export interface LeanProject {
-  id: number;
-  userId: string;
-  name: string;
-  language: 'Py' | 'C#';
-  createdAt: Date;
-  modifiedAt: Date;
-}
-
-export interface LeanFile {
+/**
+ * ProjectFile - stored in project_files table
+ * (renamed from lean_files)
+ */
+export interface ProjectFile {
   id: number;
   projectId: number;
   name: string;
@@ -21,15 +17,21 @@ export interface LeanFile {
   modifiedAt: Date;
 }
 
-export interface LeanBacktest {
+/**
+ * Backtest - stored in qc_backtests table
+ * Used for both cloud-synced and self-hosted backtests
+ * (replaces LeanBacktest, using unified qc_backtests table)
+ */
+export interface Backtest {
   id: number;
-  backtestId: string;
   projectId: number;
   userId: string;
+  qcBacktestId: string;       // UUID for self-hosted, QC backtest ID for cloud
+  qcProjectId: number;
   name: string;
   note: string | null;
   description: string | null;
-  status: 'queued' | 'running' | 'completed' | 'error';
+  status: string;             // 'queued' | 'running' | 'completed' | 'error'
   progress: number;
   startedAt: Date | null;
   completedAt: Date | null;
@@ -38,6 +40,8 @@ export interface LeanBacktest {
   startDate: Date;
   endDate: Date;
   cash: number;
+  initialCapital: number | null;
+  finalEquity: number | null;
   // Core statistics
   netProfit: number | null;
   sharpeRatio: number | null;
@@ -64,10 +68,19 @@ export interface LeanBacktest {
   rollingWindow: unknown;
   ordersJson: unknown;
   insightsJson: unknown;
+  extendedStats: unknown;
+  // Metadata
+  source: 'cloud' | 'self_hosted';
+  qcCreatedAt: Date | null;
+  syncedAt: Date | null;
   createdAt: Date;
 }
 
-export interface LeanOptimization {
+/**
+ * Optimization - stored in optimizations table
+ * (renamed from lean_optimizations)
+ */
+export interface Optimization {
   id: number;
   optimizationId: string;
   projectId: number;
@@ -82,10 +95,13 @@ export interface LeanOptimization {
   target: string;
   startDate: Date;
   endDate: Date;
+  cash: number;
   totalBacktests: number | null;
   completedBacktests: number;
   results: unknown;
   bestParameters: unknown;
+  note: string | null;
+  description: string | null;
   createdAt: Date;
 }
 
@@ -147,3 +163,29 @@ export interface OptimizationJobData {
   endDate: string;
   cash: number;
 }
+
+/**
+ * Project - stored in projects table
+ * Main project entity
+ */
+export interface Project {
+  id: number;
+  userId: string;
+  name: string;
+  description: string | null;
+  qcProjectId: string | null;
+  language: 'Py' | 'C#';
+  status: string;
+  tags: unknown;
+  activeVersionId: number | null;
+  deployedVersionId: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  modifiedAt: Date;
+}
+
+// Legacy type aliases for backward compatibility during migration
+export type LeanFile = ProjectFile;
+export type LeanBacktest = Backtest;
+export type LeanOptimization = Optimization;
+export type LeanProject = Project;
