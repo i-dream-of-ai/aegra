@@ -245,17 +245,18 @@ router.post('/read', async (req: Request, res: Response) => {
 
     let files: LeanFile[];
 
-    if (name) {
+    // Handle wildcard "*" to return all files (same as no name provided)
+    if (!name || name === '*') {
+      files = await query<LeanFile>(
+        'SELECT * FROM lean_files WHERE project_id = $1 ORDER BY name',
+        [internalProjectId]
+      );
+    } else {
       const file = await queryOne<LeanFile>(
         'SELECT * FROM lean_files WHERE project_id = $1 AND name = $2',
         [internalProjectId, name]
       );
       files = file ? [file] : [];
-    } else {
-      files = await query<LeanFile>(
-        'SELECT * FROM lean_files WHERE project_id = $1 ORDER BY name',
-        [internalProjectId]
-      );
     }
 
     const response: QCFilesResponse = {
