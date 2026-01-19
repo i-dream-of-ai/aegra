@@ -234,6 +234,8 @@ async def read_backtest(
                     "max_drawdown": stats.get("Drawdown", "N/A"),
                     "win_rate": stats.get("Win Rate", "N/A"),
                     "total_orders": stats.get("Total Orders", "N/A"),
+                    "total_wins": stats.get("Total Wins", "N/A"),
+                    "total_losses": stats.get("Total Losses", "N/A"),
                     "profit_factor": stats.get(
                         "Profit-Loss Ratio", stats.get("Expectancy", "N/A")
                     ),

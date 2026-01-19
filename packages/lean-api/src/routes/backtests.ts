@@ -79,13 +79,17 @@ function mapStatus(status: string): string {
  */
 function toQCBacktest(bt: Backtest) {
   // Ensure numeric values (DB may return strings for numeric columns)
-  const netProfit = Number(bt.netProfit) || 0;
-  const cagr = Number(bt.cagr) || 0;
-  const drawdown = Number(bt.drawdown) || 0;
+  // Note: netProfit, cagr, drawdown stored as percentages (3.08 = 3.08%)
+  // winRate stored as decimal (0.49 = 49%)
+  const netProfit = Number(bt.netProfit) || 0;  // Already a percentage like 3.08
+  const cagr = Number(bt.cagr) || 0;            // Already a percentage like 3.08
+  const drawdown = Number(bt.drawdown) || 0;    // Already a percentage like 13.8
   const sharpeRatio = Number(bt.sharpeRatio) || 0;
-  const winRate = Number(bt.winRate) || 0;
+  const winRate = Number(bt.winRate) || 0;      // Decimal like 0.49
   const profitLossRatio = Number(bt.profitLossRatio) || 0;
   const totalTrades = Number(bt.totalTrades) || 0;
+  const totalWins = bt.totalWins != null ? Number(bt.totalWins) : null;
+  const totalLosses = bt.totalLosses != null ? Number(bt.totalLosses) : null;
   const cash = Number(bt.cash) || 100000;
 
   // Extended statistics from database (use actual values when available)
@@ -114,12 +118,16 @@ function toQCBacktest(bt: Backtest) {
   };
 
   // Build statistics dictionary - ALL values from LEAN results
+  // Note: netProfit, cagr, drawdown are already percentages (3.08 = 3.08%)
+  // winRate is a decimal (0.49 = 49%), so multiply by 100
   const statistics: Record<string, string> = {
     'Total Orders': String(totalTrades),
+    'Total Wins': totalWins != null ? String(totalWins) : 'N/A',
+    'Total Losses': totalLosses != null ? String(totalLosses) : 'N/A',
     'Average Win': fmt(averageWin, 2, '%'),
     'Average Loss': fmt(averageLoss, 2, '%'),
-    'Compounding Annual Return': `${(cagr * 100).toFixed(2)}%`,
-    'Drawdown': `${(drawdown * 100).toFixed(2)}%`,
+    'Compounding Annual Return': `${cagr.toFixed(2)}%`,
+    'Drawdown': `${drawdown.toFixed(2)}%`,
     'Expectancy': '0',
     'Start Equity': fmtCurrency(cash),
     'End Equity': fmtCurrency(endEquity),

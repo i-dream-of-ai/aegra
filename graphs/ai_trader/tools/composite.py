@@ -405,7 +405,7 @@ async def qc_update_and_run_backtest(
     Args:
         file_name: Name of the file to update (e.g., "main.py")
         file_content: Complete new contents of the file
-        backtest_name: Format: "[Symbols] [Strategy Type]"
+        backtest_name: REQUIRED. Descriptive name like "SPY Momentum | 2020-2024 | ATR Stop"
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
@@ -514,7 +514,7 @@ async def qc_edit_and_run_backtest(
     Args:
         file_name: Name of the file to edit
         edits: List of edits, each with old_content and new_content
-        backtest_name: Format: "[Symbols] [Strategy Type]"
+        backtest_name: REQUIRED. Descriptive name like "SPY Momentum | 2020-2024 | ATR Stop"
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
