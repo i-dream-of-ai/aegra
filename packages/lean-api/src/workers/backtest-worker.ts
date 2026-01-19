@@ -7,11 +7,6 @@ import { Worker, Job } from 'bullmq';
 import { query, queryOne, execute } from '../services/database.js';
 import { ensureMultipleSymbolsCached, getDailyBars } from '../services/market-data.js';
 import {
-  isS3Enabled,
-  isSymbolCachedInS3,
-  ensureSymbolLocallyAvailable,
-  uploadSymbolToS3,
-  ensureStaticDataAvailable,
   getLocalCacheDir,
   getHostCacheDir,
 } from '../services/s3-cache.js';
@@ -55,16 +50,10 @@ interface LeanResult {
 }
 
 /**
- * Check if LEAN data exists in cache (local or S3)
- * If in S3 but not local, downloads it
+ * Check if LEAN data exists in cache
+ * Cache is backed by s3fs mount, so local check is sufficient
  */
 async function isDataCached(symbol: string): Promise<boolean> {
-  // First check if S3 is enabled - if so, use S3 cache logic
-  if (isS3Enabled()) {
-    return ensureSymbolLocallyAvailable(symbol);
-  }
-
-  // Fallback to local-only check
   const symbolLower = symbol.toLowerCase();
   const cacheDir = getLocalCacheDir();
   const zipPath = path.join(cacheDir, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
@@ -204,7 +193,7 @@ async function generateFactorFileToCache(
 
 /**
  * Ensure symbol data exists in persistent cache - generates if missing
- * If S3 is enabled, uploads generated data to S3 for future reuse
+ * Cache is backed by s3fs mount to DO Spaces, so writes persist automatically
  */
 async function ensureSymbolInCache(
   symbol: string,
@@ -230,20 +219,46 @@ async function ensureSymbolInCache(
     await generateFactorFileToCache(symbol, startDate, 0);
   }
 
-  // Upload to S3/DO Spaces for persistence across deployments
-  if (isS3Enabled()) {
-    console.log(`[LEAN Data Cache] Uploading ${symbol} to DO Spaces...`);
-    await uploadSymbolToS3(symbol);
-  }
+  console.log(`[LEAN Data Cache] ${symbol} written to cache (persisted via s3fs)`);
 }
 
 /**
  * Ensure LEAN static data files are available (symbol-properties, market-hours)
- * Uses S3 cache service to download from S3/GitHub as needed
+ * Downloads from GitHub if not already in cache (which is s3fs-mounted)
  */
 async function ensureLeanStaticData(): Promise<void> {
-  // Use the S3 cache service which handles local check, S3 download, and GitHub fallback
-  await ensureStaticDataAvailable();
+  const cacheDir = getLocalCacheDir();
+
+  const staticFiles = [
+    { relativePath: 'symbol-properties/symbol-properties-database.csv',
+      url: 'https://raw.githubusercontent.com/QuantConnect/Lean/master/Data/symbol-properties/symbol-properties-database.csv' },
+    { relativePath: 'market-hours/market-hours-database.json',
+      url: 'https://raw.githubusercontent.com/QuantConnect/Lean/master/Data/market-hours/market-hours-database.json' },
+  ];
+
+  for (const { relativePath, url } of staticFiles) {
+    const localPath = path.join(cacheDir, relativePath);
+
+    // Check if already exists
+    try {
+      await fs.access(localPath);
+      console.log(`[LEAN Data Cache] Static data ${relativePath} available`);
+      continue;
+    } catch {
+      // Not in cache, download from GitHub
+    }
+
+    console.log(`[LEAN Data Cache] Downloading ${relativePath} from GitHub...`);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download ${relativePath}: ${response.status}`);
+    }
+    const content = await response.text();
+
+    await fs.mkdir(path.dirname(localPath), { recursive: true });
+    await fs.writeFile(localPath, content);
+    console.log(`[LEAN Data Cache] Downloaded ${relativePath}`);
+  }
 }
 
 /**
@@ -523,7 +538,6 @@ async function runLeanBacktest(
     console.log('[LEAN] Algorithm dir:', algorithmDir);
     console.log('[LEAN] Data cache (local):', localCacheDir);
     console.log('[LEAN] Data cache (host mount):', hostDataCacheDir);
-    console.log('[LEAN] S3 enabled:', isS3Enabled());
     console.log('[LEAN] Results dir:', resultsDir);
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
 
