@@ -346,6 +346,8 @@ class StreamingService:
     async def interrupt_run(self, run_id: str) -> bool:
         """Interrupt a running execution"""
         try:
+            # Cancel the background asyncio task first
+            self._cancel_background_task(run_id)
             await self.signal_run_error(run_id, "Run was interrupted")
             await self._update_run_status(run_id, "interrupted")
             return True
@@ -356,6 +358,8 @@ class StreamingService:
     async def cancel_run(self, run_id: str) -> bool:
         """Cancel a pending or running execution - uses standard status"""
         try:
+            # Cancel the background asyncio task first
+            self._cancel_background_task(run_id)
             await self.signal_run_cancelled(run_id)
             await self._update_run_status(run_id, "interrupted")  # Standard status
             return True

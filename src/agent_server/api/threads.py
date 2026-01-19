@@ -690,8 +690,8 @@ async def get_thread_history_post(
         if checkpoint_ns is not None and not isinstance(checkpoint_ns, str):
             raise HTTPException(422, "Invalid 'checkpoint_ns'; must be a string")
 
-        logger.debug(
-            f"history POST: thread_id={thread_id} limit={limit} before={before} subgraphs={subgraphs} checkpoint_ns={checkpoint_ns}"
+        logger.info(
+            f"[history POST] thread_id={thread_id} limit={limit} before={before} subgraphs={subgraphs} checkpoint_ns={checkpoint_ns}"
         )
 
         # Verify the thread exists and belongs to the user
@@ -700,14 +700,16 @@ async def get_thread_history_post(
         )
         thread = await session.scalar(stmt)
         if not thread:
+            logger.warning(f"[history POST] thread not found: {thread_id}")
             raise HTTPException(404, f"Thread '{thread_id}' not found")
 
         # Extract graph_id from thread metadata
         thread_metadata = thread.metadata_json or {}
         graph_id = thread_metadata.get("graph_id")
+        logger.info(f"[history POST] thread_id={thread_id} graph_id={graph_id} metadata_keys={list(thread_metadata.keys())}")
         if not graph_id:
             # Return empty history if no graph is associated yet
-            logger.info(f"history POST: no graph_id set for thread {thread_id}")
+            logger.warning(f"[history POST] no graph_id set for thread {thread_id}, returning empty history")
             return []
 
         # Get compiled graph
@@ -762,6 +764,15 @@ async def get_thread_history_post(
         thread_states = thread_state_service.convert_snapshots_to_thread_states(
             state_snapshots, thread_id
         )
+
+        logger.info(
+            f"[history POST] thread_id={thread_id} snapshots={len(state_snapshots)} states={len(thread_states)}"
+        )
+        if thread_states:
+            # Log first state's message count for debugging
+            first_values = thread_states[0].values if thread_states[0].values else {}
+            messages = first_values.get("messages", [])
+            logger.info(f"[history POST] first state has {len(messages)} messages")
 
         return thread_states
 
