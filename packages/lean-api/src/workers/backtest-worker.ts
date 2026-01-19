@@ -348,6 +348,8 @@ interface ExtendedStatistics {
   drawdown: number;
   totalTrades: number;
   winRate: number;
+  totalWins: number;
+  totalLosses: number;
   profitLossRatio: number;
   // Additional stats from LEAN
   alpha: number | null;
