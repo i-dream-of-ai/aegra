@@ -373,6 +373,97 @@ router.post('/read', async (req, res) => {
 });
 
 /**
+ * POST /backtests/update - Update backtest name or note
+ */
+router.post('/update', async (req, res) => {
+  const context = { endpoint: 'backtests/update', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, backtestId, name, note } = req.body as {
+      projectId: number;
+      backtestId: string;
+      name?: string;
+      note?: string;
+    };
+    const userId = req.userId;
+
+    if (!projectId || !backtestId) {
+      return res.status(400).json({
+        success: false,
+        backtest: null,
+        errors: ['projectId and backtestId are required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        backtest: null,
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    // Build dynamic update query
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+    if (note !== undefined) {
+      updates.push(`note = $${paramIndex++}`);
+      values.push(note);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        backtest: null,
+        errors: ['No fields to update (provide name or note)'],
+      });
+    }
+
+    values.push(internalProjectId, backtestId);
+    const updated = await execute(
+      `UPDATE lean_backtests SET ${updates.join(', ')} WHERE project_id = $${paramIndex++} AND backtest_id = $${paramIndex}`,
+      values
+    );
+
+    if (updated === 0) {
+      return res.status(404).json({
+        success: false,
+        backtest: null,
+        errors: [`Backtest not found: ${backtestId}`],
+      });
+    }
+
+    // Fetch updated backtest
+    const backtest = await queryOne<LeanBacktest>(
+      'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
+      [internalProjectId, backtestId]
+    );
+
+    res.json({
+      success: true,
+      backtest: backtest ? toQCBacktest(backtest) : null,
+      errors: [],
+    });
+  } catch (error) {
+    logError('backtests/update', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      backtest: null,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
  * POST /backtests/delete - Delete a backtest
  */
 router.post('/delete', async (req, res) => {
@@ -483,6 +574,80 @@ router.post('/orders/read', async (req, res) => {
     res.status(statusCode).json({
       success: false,
       orders: [],
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
+ * POST /backtests/read/insights - Get insights data for a backtest
+ */
+router.post('/read/insights', async (req, res) => {
+  const context = { endpoint: 'backtests/read/insights', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, backtestId, start, end } = req.body as {
+      projectId: number;
+      backtestId: string;
+      start?: number;
+      end?: number;
+    };
+    const userId = req.userId;
+
+    if (!projectId || !backtestId) {
+      return res.status(400).json({
+        success: false,
+        insights: [],
+        errors: ['projectId and backtestId are required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        insights: [],
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    const backtest = await queryOne<LeanBacktest>(
+      'SELECT result_json FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
+      [internalProjectId, backtestId]
+    );
+
+    if (!backtest) {
+      return res.status(404).json({
+        success: false,
+        insights: [],
+        errors: [`Backtest not found: ${backtestId}`],
+      });
+    }
+
+    // Extract insights from result_json (LEAN stores alphas/insights here)
+    const resultJson = backtest.resultJson as Record<string, unknown> || {};
+    const alphaRuntimeStatistics = resultJson.alphaRuntimeStatistics || resultJson.AlphaRuntimeStatistics || {};
+    const insights = (resultJson.insights || resultJson.Insights || []) as unknown[];
+
+    // Filter by start/end if provided
+    let filteredInsights = insights;
+    if (start !== undefined || end !== undefined) {
+      filteredInsights = insights.slice(start || 0, end);
+    }
+
+    res.json({
+      success: true,
+      insights: filteredInsights,
+      alphaRuntimeStatistics,
+      errors: [],
+    });
+  } catch (error) {
+    logError('backtests/read/insights', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      insights: [],
       errors: [formatErrorForResponse(error)],
     });
   }

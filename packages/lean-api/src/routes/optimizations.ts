@@ -356,6 +356,224 @@ router.post('/create', async (req, res) => {
 });
 
 /**
+ * POST /optimizations/estimate - Estimate optimization cost/runtime
+ */
+router.post('/estimate', async (req, res) => {
+  const context = { endpoint: 'optimizations/estimate', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, parameters, nodeType, parallelNodes } = req.body as {
+      projectId: number;
+      organizationId?: string;
+      compileId?: string;
+      parameters: Array<{ name: string; min: number; max: number; step: number }>;
+      nodeType?: string;
+      parallelNodes?: number;
+    };
+    const userId = req.userId;
+
+    if (!projectId || !parameters || parameters.length === 0) {
+      return res.status(400).json({
+        success: false,
+        estimate: null,
+        errors: ['projectId and parameters are required'],
+      });
+    }
+
+    // Calculate total backtests needed (grid search)
+    let totalBacktests = 1;
+    for (const param of parameters) {
+      const steps = Math.floor((param.max - param.min) / param.step) + 1;
+      totalBacktests *= steps;
+    }
+
+    // Estimate based on parallel nodes (default 1)
+    const nodes = parallelNodes || 1;
+    const estimatedBacktestTimeSeconds = 30; // Assume 30s per backtest
+    const totalTimeSeconds = Math.ceil((totalBacktests * estimatedBacktestTimeSeconds) / nodes);
+
+    res.json({
+      success: true,
+      estimate: {
+        totalBacktests,
+        estimatedTimeSeconds: totalTimeSeconds,
+        estimatedTimeFormatted: `${Math.ceil(totalTimeSeconds / 60)} minutes`,
+        parallelNodes: nodes,
+        nodeType: nodeType || 'default',
+        // Self-hosted has no cost
+        estimatedCost: 0,
+        estimatedCostFormatted: '$0.00 (self-hosted)',
+      },
+      errors: [],
+    });
+  } catch (error) {
+    logError('optimizations/estimate', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      estimate: null,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
+ * POST /optimizations/update - Update optimization name
+ */
+router.post('/update', async (req, res) => {
+  const context = { endpoint: 'optimizations/update', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, optimizationId, name } = req.body as {
+      projectId: number;
+      optimizationId: string;
+      name: string;
+    };
+    const userId = req.userId;
+
+    if (!projectId || !optimizationId) {
+      return res.status(400).json({
+        success: false,
+        optimization: null,
+        errors: ['projectId and optimizationId are required'],
+      });
+    }
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        optimization: null,
+        errors: ['name is required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        optimization: null,
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    const updated = await execute(
+      'UPDATE lean_optimizations SET name = $1 WHERE project_id = $2 AND optimization_id = $3',
+      [name, internalProjectId, optimizationId]
+    );
+
+    if (updated === 0) {
+      return res.status(404).json({
+        success: false,
+        optimization: null,
+        errors: [`Optimization not found: ${optimizationId}`],
+      });
+    }
+
+    // Fetch updated optimization
+    const optimization = await queryOne<LeanOptimization>(
+      'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+      [internalProjectId, optimizationId]
+    );
+
+    res.json({
+      success: true,
+      optimization: optimization ? toQCOptimization(optimization) : null,
+      errors: [],
+    });
+  } catch (error) {
+    logError('optimizations/update', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      optimization: null,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
+ * POST /optimizations/abort - Abort a running optimization
+ */
+router.post('/abort', async (req, res) => {
+  const context = { endpoint: 'optimizations/abort', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, optimizationId } = req.body as {
+      projectId: number;
+      optimizationId: string;
+    };
+    const userId = req.userId;
+
+    if (!projectId || !optimizationId) {
+      return res.status(400).json({
+        success: false,
+        errors: ['projectId and optimizationId are required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    // Check optimization exists and is running
+    const optimization = await queryOne<LeanOptimization>(
+      'SELECT * FROM lean_optimizations WHERE project_id = $1 AND optimization_id = $2',
+      [internalProjectId, optimizationId]
+    );
+
+    if (!optimization) {
+      return res.status(404).json({
+        success: false,
+        errors: [`Optimization not found: ${optimizationId}`],
+      });
+    }
+
+    if (optimization.status !== 'running' && optimization.status !== 'queued') {
+      return res.status(400).json({
+        success: false,
+        errors: [`Optimization is not running (status: ${optimization.status})`],
+      });
+    }
+
+    // Update status to aborted
+    await execute(
+      "UPDATE lean_optimizations SET status = 'aborted', completed_at = NOW() WHERE project_id = $1 AND optimization_id = $2",
+      [internalProjectId, optimizationId]
+    );
+
+    // Try to remove from queue if still queued
+    try {
+      const queue = getOptimizationQueue();
+      const job = await queue.getJob(optimizationId);
+      if (job) {
+        await job.remove();
+      }
+    } catch (queueError) {
+      // Job may have already started, that's ok
+      console.warn('[Optimization] Could not remove job from queue:', queueError);
+    }
+
+    res.json({
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    logError('optimizations/abort', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
  * POST /optimizations/delete - Delete an optimization
  */
 router.post('/delete', async (req, res) => {
