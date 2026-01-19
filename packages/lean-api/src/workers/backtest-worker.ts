@@ -377,20 +377,32 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
   const tradeStats = (totalPerf.tradeStatistics || totalPerf.TradeStatistics || {}) as Record<string, unknown>;
 
 
-  // Parse percentage strings to decimals (QC Cloud stores as decimals: 0.49 = 49%)
-  // LEAN returns "49%" or "0.49" - we need to normalize to decimal format
+  // Parse percentage strings - QC Cloud stores percentages as-is (3.08 = 3.08%)
+  // LEAN returns "3.08%" - we just strip the % sign and keep the number
+  const parsePercent = (val: string | number | undefined): number => {
+    if (val === undefined || val === null) return 0;
+    if (typeof val === 'number') return val;
+    const str = String(val);
+    // Strip % sign and return the number as-is
+    return parseFloat(str.replace('%', '')) || 0;
+  };
+
+  // Parse percentage to decimal format (for winRate which QC stores as 0.49 = 49%)
+  // LEAN returns "49%" - we need to convert to decimal 0.49
   const parsePercentToDecimal = (val: string | number | undefined): number => {
     if (val === undefined || val === null) return 0;
-    if (typeof val === 'number') return val; // Already correct format
+    if (typeof val === 'number') {
+      // If already a decimal (< 1), keep it; if percentage (>= 1), divide
+      return val >= 1 ? val / 100 : val;
+    }
     const str = String(val);
     if (str.includes('%')) {
       // "49%" -> 0.49
       return (parseFloat(str.replace('%', '')) || 0) / 100;
     }
-    // Plain number string - assume it's already a percentage value like "49"
+    // Plain number - if >= 1, it's a percentage that needs dividing
     const num = parseFloat(str) || 0;
-    // If > 1, it's likely a percentage that needs dividing
-    return num > 1 ? num / 100 : num;
+    return num >= 1 ? num / 100 : num;
   };
 
   const parseNumber = (val: string | number | undefined): number => {
@@ -413,8 +425,10 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
   };
 
   // Stats uses "Title Case", portfolioStats uses camelCase
+  // Note: netProfit, cagr, drawdown stored as percentages (3.08 = 3.08%)
+  // winRate stored as decimal (0.49 = 49%)
   return {
-    netProfit: parsePercentToDecimal(
+    netProfit: parsePercent(
       stats['Net Profit'] ||
       getValue(portfolioStats, 'totalNetProfit')
     ),
@@ -422,11 +436,11 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
       stats['Sharpe Ratio'] ||
       getValue(portfolioStats, 'sharpeRatio')
     ),
-    cagr: parsePercentToDecimal(
+    cagr: parsePercent(
       stats['Compounding Annual Return'] ||
       getValue(portfolioStats, 'compoundingAnnualReturn')
     ),
-    drawdown: parsePercentToDecimal(
+    drawdown: parsePercent(
       stats['Drawdown'] ||
       getValue(portfolioStats, 'drawdown')
     ),
@@ -438,6 +452,17 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
     winRate: parsePercentToDecimal(
       stats['Win Rate'] ||
       getValue(tradeStats, 'winRate')
+    ),
+    // Win/Loss counts
+    totalWins: parseInt(
+      stats['Total Wins'] ||
+      String(getValue(tradeStats, 'numberOfWinningTrades') || 0),
+      10
+    ),
+    totalLosses: parseInt(
+      stats['Total Losses'] ||
+      String(getValue(tradeStats, 'numberOfLosingTrades') || 0),
+      10
     ),
     profitLossRatio: parseNumber(
       stats['Profit-Loss Ratio'] ||
@@ -933,23 +958,25 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
          drawdown = $5,
          total_trades = $6,
          win_rate = $7,
-         profit_loss_ratio = $8,
-         rolling_window = $9,
-         result_json = $10,
-         orders_json = $11,
-         insights_json = $12,
-         alpha = $13,
-         beta = $14,
-         sortino_ratio = $15,
-         treynor_ratio = $16,
-         information_ratio = $17,
-         tracking_error = $18,
-         annual_std_dev = $19,
-         annual_variance = $20,
-         total_fees = $21,
-         average_win = $22,
-         average_loss = $23,
-         end_equity = $24
+         total_wins = $8,
+         total_losses = $9,
+         profit_loss_ratio = $10,
+         rolling_window = $11,
+         result_json = $12,
+         orders_json = $13,
+         insights_json = $14,
+         alpha = $15,
+         beta = $16,
+         sortino_ratio = $17,
+         treynor_ratio = $18,
+         information_ratio = $19,
+         tracking_error = $20,
+         annual_std_dev = $21,
+         annual_variance = $22,
+         total_fees = $23,
+         average_win = $24,
+         average_loss = $25,
+         end_equity = $26
        WHERE qc_backtest_id = $1`,
       [
         backtestId,
@@ -959,6 +986,8 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
         stats.drawdown,
         stats.totalTrades,
         stats.winRate,
+        stats.totalWins,
+        stats.totalLosses,
         stats.profitLossRatio,
         JSON.stringify(result.rollingWindow),
         JSON.stringify(result.resultJson),

@@ -48,6 +48,8 @@ export interface Backtest {
   cagr: number | null;
   drawdown: number | null;
   totalTrades: number | null;
+  totalWins: number | null;
+  totalLosses: number | null;
   winRate: number | null;
   profitLossRatio: number | null;
   // Extended statistics
