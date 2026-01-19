@@ -377,11 +377,20 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
   const tradeStats = (totalPerf.tradeStatistics || totalPerf.TradeStatistics || {}) as Record<string, unknown>;
 
 
-  // Parse percentage strings (LEAN returns "12.34%" or decimals like 0.1234)
-  const parsePercent = (val: string | number | undefined): number => {
+  // Parse percentage strings to decimals (QC Cloud stores as decimals: 0.49 = 49%)
+  // LEAN returns "49%" or "0.49" - we need to normalize to decimal format
+  const parsePercentToDecimal = (val: string | number | undefined): number => {
     if (val === undefined || val === null) return 0;
-    if (typeof val === 'number') return val * 100; // Already a decimal
-    return parseFloat(String(val).replace('%', '')) || 0;
+    if (typeof val === 'number') return val; // Already correct format
+    const str = String(val);
+    if (str.includes('%')) {
+      // "49%" -> 0.49
+      return (parseFloat(str.replace('%', '')) || 0) / 100;
+    }
+    // Plain number string - assume it's already a percentage value like "49"
+    const num = parseFloat(str) || 0;
+    // If > 1, it's likely a percentage that needs dividing
+    return num > 1 ? num / 100 : num;
   };
 
   const parseNumber = (val: string | number | undefined): number => {
@@ -405,7 +414,7 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
 
   // Stats uses "Title Case", portfolioStats uses camelCase
   return {
-    netProfit: parsePercent(
+    netProfit: parsePercentToDecimal(
       stats['Net Profit'] ||
       getValue(portfolioStats, 'totalNetProfit')
     ),
@@ -413,11 +422,11 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
       stats['Sharpe Ratio'] ||
       getValue(portfolioStats, 'sharpeRatio')
     ),
-    cagr: parsePercent(
+    cagr: parsePercentToDecimal(
       stats['Compounding Annual Return'] ||
       getValue(portfolioStats, 'compoundingAnnualReturn')
     ),
-    drawdown: parsePercent(
+    drawdown: parsePercentToDecimal(
       stats['Drawdown'] ||
       getValue(portfolioStats, 'drawdown')
     ),
@@ -426,7 +435,7 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
       String(getValue(tradeStats, 'totalNumberOfTrades') || 0),
       10
     ),
-    winRate: parsePercent(
+    winRate: parsePercentToDecimal(
       stats['Win Rate'] ||
       getValue(tradeStats, 'winRate')
     ),
