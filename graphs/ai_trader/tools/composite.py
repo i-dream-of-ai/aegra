@@ -6,11 +6,52 @@ import os
 
 from langchain.tools import tool, ToolRuntime
 from langgraph.graph.ui import push_ui_message
+from pydantic import BaseModel, Field
 
 from ..context import Context
 from ..qc_api import qc_request
 from ..supabase_client import SupabaseClient
 from .utils import format_error, format_success
+
+
+# ============================================================================
+# Input Schemas - Pydantic models define tool arguments with validation
+# ============================================================================
+
+class UpdateAndRunBacktestInput(BaseModel):
+    """Input schema for qc_update_and_run_backtest tool."""
+
+    file_name: str = Field(
+        description="Name of the file to update (e.g., 'main.py')"
+    )
+    file_content: str = Field(
+        description="Complete new contents of the file - must be the FULL file, not a partial update"
+    )
+    backtest_name: str = Field(
+        description="Descriptive name for the backtest. Format: '[Symbols] [Strategy] | [Date Range] | [Key Params]'. Example: 'SPY Momentum | 2020-2024 | ATR Stop 2x'"
+    )
+
+
+class EditAndRunBacktestInput(BaseModel):
+    """Input schema for qc_edit_and_run_backtest tool."""
+
+    file_name: str = Field(
+        description="Name of the file to edit (e.g., 'main.py')"
+    )
+    edits: list[dict] = Field(
+        description="List of edits to apply. Each edit must have 'old_content' (exact text to find) and 'new_content' (replacement text). The old_content must be unique in the file."
+    )
+    backtest_name: str = Field(
+        description="Descriptive name for the backtest. Format: '[Symbols] [Strategy] | [Date Range] | [Key Params]'. Example: 'AAPL RSI Strategy | 2021-2024 | RSI 30/70'"
+    )
+
+
+class CompileAndBacktestInput(BaseModel):
+    """Input schema for qc_compile_and_backtest tool."""
+
+    backtest_name: str = Field(
+        description="Descriptive name for the backtest. Format: '[Symbols] [Strategy Type]'. Example: 'AAPL Momentum Strategy'"
+    )
 
 
 def _format_error(message: str, details: dict | None = None) -> str:
@@ -212,17 +253,13 @@ async def _confirm_backtest_started(
     return True, None
 
 
-@tool
+@tool(args_schema=CompileAndBacktestInput)
 async def qc_compile_and_backtest(
     backtest_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Compile code and create a backtest using default parameter values.
+    """Compile code and create a backtest using default parameter values.
     Returns after confirming backtest started - UI streams progress independently.
-
-    Args:
-        backtest_name: Format: "[Symbols] [Strategy Type]" (e.g., "AAPL Momentum Strategy")
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
@@ -391,21 +428,15 @@ async def qc_compile_and_optimize(
         return _format_error(f"Unexpected error: {e!s}")
 
 
-@tool
+@tool(args_schema=UpdateAndRunBacktestInput)
 async def qc_update_and_run_backtest(
     file_name: str,
     file_content: str,
     backtest_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Update file with COMPLETE new content, compile, and run backtest.
+    """Update file with COMPLETE new content, compile, and run backtest.
     Returns after confirming backtest started - UI streams progress independently.
-
-    Args:
-        file_name: Name of the file to update (e.g., "main.py")
-        file_content: Complete new contents of the file
-        backtest_name: REQUIRED. Descriptive name like "SPY Momentum | 2020-2024 | ATR Stop"
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
@@ -500,21 +531,15 @@ async def qc_update_and_run_backtest(
         return _format_error(str(e))
 
 
-@tool
+@tool(args_schema=EditAndRunBacktestInput)
 async def qc_edit_and_run_backtest(
     file_name: str,
     edits: list[dict],
     backtest_name: str,
     runtime: ToolRuntime[Context],
 ) -> str:
-    """
-    Edit file using search-and-replace, then compile and run backtest.
+    """Edit file using search-and-replace, then compile and run backtest.
     Returns after confirming backtest started - UI streams progress independently.
-
-    Args:
-        file_name: Name of the file to edit
-        edits: List of edits, each with old_content and new_content
-        backtest_name: REQUIRED. Descriptive name like "SPY Momentum | 2020-2024 | ATR Stop"
     """
     try:
         qc_project_id = runtime.context.get("qc_project_id")
