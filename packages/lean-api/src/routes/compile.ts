@@ -10,8 +10,8 @@ import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/e
 import type {
   QCCompileResponse,
   CompileCreateRequest,
+  ProjectFile,
 } from '../types/index.js';
-import type { LeanFile, LeanProject } from '../types/index.js';
 
 const router: IRouter = Router();
 
@@ -21,7 +21,7 @@ const router: IRouter = Router();
  * Returns internal project id if found, null otherwise
  */
 async function getProjectByQcId(qcProjectId: number, userId: string): Promise<number | null> {
-  // First try: look up by qc_project_id in main projects table
+  // Look up by qc_project_id in projects table
   const project = await queryOne<{ id: number }>(
     'SELECT id FROM projects WHERE qc_project_id = $1 AND user_id = $2',
     [String(qcProjectId), userId]
@@ -30,12 +30,12 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
     return project.id;
   }
 
-  // Fallback: maybe it's already an internal id in lean_projects
-  const leanProject = await queryOne<{ id: number }>(
-    'SELECT id FROM lean_projects WHERE id = $1 AND user_id = $2',
+  // Fallback: maybe it's the internal project id directly
+  const directProject = await queryOne<{ id: number }>(
+    'SELECT id FROM projects WHERE id = $1 AND user_id = $2',
     [qcProjectId, userId]
   );
-  return leanProject?.id || null;
+  return directProject?.id || null;
 }
 
 /**
@@ -161,8 +161,8 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    const files = await query<LeanFile>(
-      'SELECT * FROM lean_files WHERE project_id = $1',
+    const files = await query<ProjectFile>(
+      'SELECT * FROM project_files WHERE project_id = $1',
       [internalProjectId]
     );
 
@@ -314,8 +314,8 @@ router.post('/read', async (req, res) => {
     // For self-hosted LEAN, compilation is synchronous (done in /compile/create)
     // So /compile/read just re-validates the current files state
 
-    const files = await query<LeanFile>(
-      'SELECT * FROM lean_files WHERE project_id = $1',
+    const files = await query<ProjectFile>(
+      'SELECT * FROM project_files WHERE project_id = $1',
       [internalProjectId]
     );
 
