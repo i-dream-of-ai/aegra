@@ -25,6 +25,11 @@ const LEAN_WORKSPACES_DIR = process.env.LEAN_WORKSPACES_DIR || '/app/workspaces'
 // The container sees /app/workspaces but Docker daemon sees the host-mounted path
 const LEAN_HOST_WORKSPACES_DIR = process.env.LEAN_HOST_WORKSPACES_DIR || LEAN_WORKSPACES_DIR;
 
+// Persistent LEAN data cache - stores pre-generated LEAN format data (zips, map files, factor files)
+// This is a SHARED volume that persists across backtests - data is generated once and reused
+const LEAN_DATA_CACHE_DIR = process.env.LEAN_DATA_CACHE_DIR || '/app/lean-data-cache';
+const LEAN_HOST_DATA_CACHE_DIR = process.env.LEAN_HOST_DATA_CACHE_DIR || LEAN_DATA_CACHE_DIR;
+
 // LEAN result types
 interface LeanResult {
   Statistics?: Record<string, string>;
@@ -49,18 +54,40 @@ interface LeanResult {
 }
 
 /**
- * Convert our cached market data to LEAN's ZIP format
+ * Check if LEAN data exists in the persistent cache
+ */
+async function isDataCached(symbol: string): Promise<boolean> {
+  const symbolLower = symbol.toLowerCase();
+  const zipPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
+  const mapPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'map_files', `${symbolLower}.csv`);
+  const factorPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'factor_files', `${symbolLower}.csv`);
+
+  try {
+    await Promise.all([
+      fs.access(zipPath),
+      fs.access(mapPath),
+      fs.access(factorPath),
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert our cached market data to LEAN's ZIP format and store in persistent cache
  * LEAN expects ZIP files at: /Data/equity/usa/daily/{symbol}.zip
  * containing CSV with format: YYYYMMDD HH:MM,Open,High,Low,Close,Volume
  * Prices are scaled by 10000 (QC format), no header row
  */
-async function exportMarketDataForLean(
+async function exportMarketDataToCache(
   symbol: string,
-  bars: MarketDataDaily[],
-  dataDir: string
+  bars: MarketDataDaily[]
 ): Promise<void> {
-  // LEAN expects data at: /Data/equity/usa/daily/{symbol}.zip
-  const symbolDir = path.join(dataDir, 'equity', 'usa', 'daily');
+  const symbolLower = symbol.toLowerCase();
+
+  // Store in persistent cache
+  const symbolDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'daily');
   await fs.mkdir(symbolDir, { recursive: true });
 
   // Create CSV content in LEAN format (no header, prices * 10000)
@@ -75,10 +102,9 @@ async function exportMarketDataForLean(
     csvLines.push(`${dateStr} 00:00,${scaledOpen},${scaledHigh},${scaledLow},${scaledClose},${bar.volume}`);
   }
 
-  // Write to a temp CSV file first
   const csvContent = csvLines.join('\n');
-  const zipPath = path.join(symbolDir, `${symbol.toLowerCase()}.zip`);
-  const csvFileName = `${symbol.toLowerCase()}.csv`;
+  const zipPath = path.join(symbolDir, `${symbolLower}.zip`);
+  const csvFileName = `${symbolLower}.csv`;
 
   // Create ZIP file containing the CSV
   await new Promise<void>((resolve, reject) => {
@@ -93,33 +119,21 @@ async function exportMarketDataForLean(
     archive.finalize();
   });
 
-  console.log(`[LEAN Data] Created ${zipPath} with ${bars.length} bars`);
+  console.log(`[LEAN Data Cache] Created ${zipPath} with ${bars.length} bars`);
 }
 
 /**
- * Generate map file for a symbol
- * Map files track ticker symbol changes over time
- * Format: YYYYMMDD,ticker,exchange (e.g., 19980102,aapl,Q)
- *
- * Exchange codes:
- * - Q = NASDAQ
- * - N = NYSE
- * - A = AMEX
- * - P = NYSE Arca
- * - Z = BATS
- * - V = IEX
+ * Generate map file in persistent cache
  */
-async function generateMapFile(
+async function generateMapFileToCache(
   symbol: string,
-  dataDir: string,
   startDate: Date
 ): Promise<void> {
-  const mapFilesDir = path.join(dataDir, 'equity', 'usa', 'map_files');
+  const mapFilesDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'map_files');
   await fs.mkdir(mapFilesDir, { recursive: true });
 
   const symbolLower = symbol.toLowerCase();
 
-  // Format start date as YYYYMMDD
   const formatDate = (d: Date): string => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -127,16 +141,9 @@ async function generateMapFile(
     return `${year}${month}${day}`;
   };
 
-  // Use a date before any possible backtest start (1998 is when QC data starts)
   const historicalStart = new Date(1998, 0, 2);
-  // Use the earlier of the backtest start or 1998
   const effectiveStart = startDate < historicalStart ? startDate : historicalStart;
-
-  // End date far in the future
   const futureEnd = new Date(2050, 11, 31);
-
-  // Default to NASDAQ (Q) - most common for modern equities
-  // This could be enhanced to look up actual exchange from a database
   const exchange = 'Q';
 
   const mapContent = [
@@ -146,24 +153,18 @@ async function generateMapFile(
 
   const mapFilePath = path.join(mapFilesDir, `${symbolLower}.csv`);
   await fs.writeFile(mapFilePath, mapContent);
-  console.log(`[LEAN Data] Created map file: ${mapFilePath}`);
+  console.log(`[LEAN Data Cache] Created map file: ${mapFilePath}`);
 }
 
 /**
- * Generate factor file for a symbol
- * Factor files track split and dividend adjustments
- * Format: YYYYMMDD,price_factor,split_factor,reference_price
- *
- * For symbols without known corporate actions, we create a simple file
- * with factor 1.0 (no adjustments) throughout the backtest period.
+ * Generate factor file in persistent cache
  */
-async function generateFactorFile(
+async function generateFactorFileToCache(
   symbol: string,
-  dataDir: string,
   startDate: Date,
   referencePrice: number = 0
 ): Promise<void> {
-  const factorFilesDir = path.join(dataDir, 'equity', 'usa', 'factor_files');
+  const factorFilesDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'factor_files');
   await fs.mkdir(factorFilesDir, { recursive: true });
 
   const symbolLower = symbol.toLowerCase();
@@ -175,17 +176,10 @@ async function generateFactorFile(
     return `${year}${month}${day}`;
   };
 
-  // Use a date before any possible backtest start
   const historicalStart = new Date(1998, 0, 2);
   const effectiveStart = startDate < historicalStart ? startDate : historicalStart;
-
-  // End date far in the future
   const futureEnd = new Date(2050, 11, 31);
 
-  // Factor file format: date,price_factor,split_factor,reference_price
-  // price_factor = 1.0 means no dividend adjustment
-  // split_factor = 1.0 means no split adjustment
-  // reference_price = 0 for most entries, closing price for final entry
   const factorContent = [
     `${formatDate(effectiveStart)},1,1,0`,
     `${formatDate(futureEnd)},1,1,${referencePrice}`,
@@ -193,21 +187,35 @@ async function generateFactorFile(
 
   const factorFilePath = path.join(factorFilesDir, `${symbolLower}.csv`);
   await fs.writeFile(factorFilePath, factorContent);
-  console.log(`[LEAN Data] Created factor file: ${factorFilePath}`);
+  console.log(`[LEAN Data Cache] Created factor file: ${factorFilePath}`);
 }
 
 /**
- * Generate all auxiliary data files for a symbol (map files and factor files)
- * These are required for LEAN to properly resolve symbols and adjust prices
+ * Ensure symbol data exists in persistent cache - generates if missing
  */
-async function generateAuxiliaryDataFiles(
+async function ensureSymbolInCache(
   symbol: string,
-  dataDir: string,
-  startDate: Date,
-  referencePrice: number = 0
+  bars: MarketDataDaily[],
+  startDate: Date
 ): Promise<void> {
-  await generateMapFile(symbol, dataDir, startDate);
-  await generateFactorFile(symbol, dataDir, startDate, referencePrice);
+  if (await isDataCached(symbol)) {
+    console.log(`[LEAN Data Cache] ${symbol} already cached, skipping generation`);
+    return;
+  }
+
+  console.log(`[LEAN Data Cache] Generating LEAN data for ${symbol}...`);
+
+  if (bars.length > 0) {
+    await exportMarketDataToCache(symbol, bars);
+    const lastBar = bars[bars.length - 1];
+    const referencePrice = Number(lastBar.close);
+    await generateMapFileToCache(symbol, startDate);
+    await generateFactorFileToCache(symbol, startDate, referencePrice);
+  } else {
+    // Generate auxiliary files even without price data
+    await generateMapFileToCache(symbol, startDate);
+    await generateFactorFileToCache(symbol, startDate, 0);
+  }
 }
 
 /**
@@ -472,27 +480,24 @@ async function runLeanBacktest(
   resultJson?: unknown;
 }> {
   // Create workspace directories for this backtest
-  // Uses shared volume accessible from both this container and the Docker host
+  // Only algorithm files and results are per-backtest - data comes from persistent cache
   const workspaceId = `${projectId}-${Date.now()}`;
   const tempBase = path.join(LEAN_WORKSPACES_DIR, `lean-backtest-${workspaceId}`);
   const algorithmDir = path.join(tempBase, 'algorithm');
-  const dataDir = path.join(tempBase, 'data');
   const resultsDir = path.join(tempBase, 'results');
 
   // Host paths for Docker volume mounts (when using sibling container pattern)
   const hostTempBase = path.join(LEAN_HOST_WORKSPACES_DIR, `lean-backtest-${workspaceId}`);
   const hostAlgorithmDir = path.join(hostTempBase, 'algorithm');
-  const hostDataDir = path.join(hostTempBase, 'data');
   const hostResultsDir = path.join(hostTempBase, 'results');
   const hostConfigPath = path.join(hostTempBase, 'config.json');
 
   try {
     await fs.mkdir(algorithmDir, { recursive: true });
-    await fs.mkdir(dataDir, { recursive: true });
     await fs.mkdir(resultsDir, { recursive: true });
 
-    // Copy LEAN static data files (symbol-properties, market-hours)
-    await copyLeanStaticData(dataDir);
+    // Ensure persistent cache has static data (symbol-properties, market-hours)
+    await copyLeanStaticData(LEAN_DATA_CACHE_DIR);
 
     await onProgress(15);
 
@@ -505,27 +510,16 @@ async function runLeanBacktest(
     await onProgress(20);
 
     // Ensure market data is cached from provider (Alpha Vantage, Alpaca, etc.)
-    // This will fetch data if not already in the database
-    console.log(`[LEAN Data] Ensuring market data cached for symbols: ${symbols.join(', ')}`);
+    // This fetches from API if not in DB
+    console.log(`[LEAN Data] Ensuring market data in DB for symbols: ${symbols.join(', ')}`);
     await ensureMultipleSymbolsCached(symbols, startDate, endDate);
 
     await onProgress(30);
 
-    // Export market data and generate auxiliary files for each symbol
+    // Ensure LEAN-format data exists in persistent cache (generates if missing)
     for (const symbol of symbols) {
       const bars = await getDailyBars(symbol, startDate, endDate);
-      if (bars.length > 0) {
-        await exportMarketDataForLean(symbol, bars, dataDir);
-        // Get the last closing price for the factor file reference price
-        const lastBar = bars[bars.length - 1];
-        const referencePrice = Number(lastBar.close);
-        // Generate map file and factor file for this symbol
-        await generateAuxiliaryDataFiles(symbol, dataDir, startDate, referencePrice);
-      } else {
-        console.warn(`[LEAN Data] No data for ${symbol} in date range`);
-        // Still generate auxiliary files even without data, so LEAN can at least try to resolve the symbol
-        await generateAuxiliaryDataFiles(symbol, dataDir, startDate, 0);
-      }
+      await ensureSymbolInCache(symbol, bars, startDate);
     }
 
     await onProgress(40);
@@ -540,13 +534,13 @@ async function runLeanBacktest(
     // Run LEAN Docker container
     const dockerImage = process.env.LEAN_DOCKER_IMAGE || 'quantconnect/lean:latest';
 
-    // LEAN needs command-line arguments to use our config properly
-    // Use HOST paths for volume mounts when using sibling container pattern
+    // Mount persistent data cache as /Data (read-only)
+    // Algorithm and results are per-backtest
     const dockerArgs = [
       'run',
       '--rm',
       '-v', `${hostAlgorithmDir}:/Algorithm:ro`,
-      '-v', `${hostDataDir}:/Data:ro`,
+      '-v', `${LEAN_HOST_DATA_CACHE_DIR}:/Data:ro`,  // Persistent cache!
       '-v', `${hostResultsDir}:/Results`,
       '-v', `${hostConfigPath}:/Lean/config.json:ro`,
       '--memory', process.env.LEAN_MEMORY_LIMIT || '4g',
@@ -561,35 +555,9 @@ async function runLeanBacktest(
     console.log('[LEAN] Starting Docker container...');
     console.log('[LEAN] Command: docker', dockerArgs.join(' '));
     console.log('[LEAN] Algorithm dir:', algorithmDir);
-    console.log('[LEAN] Data dir:', dataDir);
+    console.log('[LEAN] Data cache:', LEAN_DATA_CACHE_DIR);
     console.log('[LEAN] Results dir:', resultsDir);
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
-
-    // Log the data directory structure for debugging
-    try {
-      const logDirContents = async (dir: string, prefix: string = '') => {
-        try {
-          const entries = await fs.readdir(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-              console.log(`[LEAN Data Structure] ${prefix}${entry.name}/`);
-              await logDirContents(fullPath, prefix + '  ');
-            } else {
-              const stats = await fs.stat(fullPath);
-              console.log(`[LEAN Data Structure] ${prefix}${entry.name} (${stats.size} bytes)`);
-            }
-          }
-        } catch (e) {
-          console.log(`[LEAN Data Structure] ${prefix}(error reading: ${e})`);
-        }
-      };
-      console.log('[LEAN Data Structure] === Data Directory Contents ===');
-      await logDirContents(dataDir);
-      console.log('[LEAN Data Structure] === End Data Directory ===');
-    } catch (e) {
-      console.error('[LEAN] Error logging data directory:', e);
-    }
 
     const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const proc = spawn('docker', dockerArgs);
