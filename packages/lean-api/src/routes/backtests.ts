@@ -69,23 +69,33 @@ function mapStatus(status: string): string {
  * Matches QuantConnect API response structure exactly
  */
 function toQCBacktest(bt: LeanBacktest) {
+  // Ensure numeric values (DB may return strings for numeric columns)
+  const netProfit = Number(bt.netProfit) || 0;
+  const cagr = Number(bt.cagr) || 0;
+  const drawdown = Number(bt.drawdown) || 0;
+  const sharpeRatio = Number(bt.sharpeRatio) || 0;
+  const winRate = Number(bt.winRate) || 0;
+  const profitLossRatio = Number(bt.profitLossRatio) || 0;
+  const totalTrades = Number(bt.totalTrades) || 0;
+  const cash = Number(bt.cash) || 100000;
+
   // Build statistics dictionary (string keys matching QC format)
   const statistics: Record<string, string> = {
-    'Total Orders': String(bt.totalTrades || 0),
+    'Total Orders': String(totalTrades),
     'Average Win': '0%',
     'Average Loss': '0%',
-    'Compounding Annual Return': `${((bt.cagr || 0) * 100).toFixed(2)}%`,
-    'Drawdown': `${((bt.drawdown || 0) * 100).toFixed(2)}%`,
+    'Compounding Annual Return': `${(cagr * 100).toFixed(2)}%`,
+    'Drawdown': `${(drawdown * 100).toFixed(2)}%`,
     'Expectancy': '0',
-    'Start Equity': String(bt.cash || 100000),
-    'End Equity': String(Math.round((bt.cash || 100000) * (1 + (bt.netProfit || 0) / 100))),
-    'Net Profit': `${((bt.netProfit || 0)).toFixed(2)}%`,
-    'Sharpe Ratio': String((bt.sharpeRatio || 0).toFixed(3)),
+    'Start Equity': String(cash),
+    'End Equity': String(Math.round(cash * (1 + netProfit / 100))),
+    'Net Profit': `${netProfit.toFixed(2)}%`,
+    'Sharpe Ratio': String(sharpeRatio.toFixed(3)),
     'Sortino Ratio': '0',
     'Probabilistic Sharpe Ratio': '0%',
-    'Loss Rate': `${(((1 - (bt.winRate || 0)) * 100)).toFixed(0)}%`,
-    'Win Rate': `${((bt.winRate || 0) * 100).toFixed(0)}%`,
-    'Profit-Loss Ratio': String((bt.profitLossRatio || 0).toFixed(2)),
+    'Loss Rate': `${((1 - winRate) * 100).toFixed(0)}%`,
+    'Win Rate': `${(winRate * 100).toFixed(0)}%`,
+    'Profit-Loss Ratio': String(profitLossRatio.toFixed(2)),
     'Alpha': '0',
     'Beta': '0',
     'Annual Standard Deviation': '0',
@@ -98,11 +108,11 @@ function toQCBacktest(bt: LeanBacktest) {
 
   // Build runtime statistics
   const runtimeStatistics: Record<string, string> = {
-    'Equity': String(Math.round((bt.cash || 100000) * (1 + (bt.netProfit || 0) / 100))),
+    'Equity': String(Math.round(cash * (1 + netProfit / 100))),
     'Fees': '$0.00',
     'Holdings': '0',
-    'Net Profit': `${((bt.netProfit || 0)).toFixed(2)}%`,
-    'Return': `${((bt.netProfit || 0)).toFixed(2)}%`,
+    'Net Profit': `${netProfit.toFixed(2)}%`,
+    'Return': `${netProfit.toFixed(2)}%`,
     'Unrealized': '$0.00',
     'Volume': '$0.00',
   };
@@ -110,10 +120,10 @@ function toQCBacktest(bt: LeanBacktest) {
   // Build totalPerformance (camelCase to match QC)
   const totalPerformance = {
     tradeStatistics: {
-      totalNumberOfTrades: bt.totalTrades || 0,
-      winRate: bt.winRate || 0,
-      lossRate: bt.winRate ? 1 - bt.winRate : 0,
-      profitLossRatio: bt.profitLossRatio || 0,
+      totalNumberOfTrades: totalTrades,
+      winRate: winRate,
+      lossRate: 1 - winRate,
+      profitLossRatio: profitLossRatio,
       averageProfit: 0,
       averageLoss: 0,
       averageProfitLoss: 0,
@@ -122,15 +132,15 @@ function toQCBacktest(bt: LeanBacktest) {
       totalProfitLoss: 0,
     },
     portfolioStatistics: {
-      sharpeRatio: bt.sharpeRatio || 0,
-      compoundingAnnualReturn: bt.cagr || 0,
-      totalNetProfit: bt.netProfit || 0,
-      drawdown: bt.drawdown || 0,
-      startEquity: bt.cash || 100000,
-      endEquity: (bt.cash || 100000) * (1 + (bt.netProfit || 0) / 100),
-      winRate: bt.winRate || 0,
-      lossRate: bt.winRate ? 1 - bt.winRate : 0,
-      profitLossRatio: bt.profitLossRatio || 0,
+      sharpeRatio: sharpeRatio,
+      compoundingAnnualReturn: cagr,
+      totalNetProfit: netProfit,
+      drawdown: drawdown,
+      startEquity: cash,
+      endEquity: cash * (1 + netProfit / 100),
+      winRate: winRate,
+      lossRate: 1 - winRate,
+      profitLossRatio: profitLossRatio,
     },
     closedTrades: [],
   };
