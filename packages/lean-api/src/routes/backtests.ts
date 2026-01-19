@@ -67,6 +67,7 @@ function mapStatus(status: string): string {
 /**
  * Convert internal backtest to QC format
  * Matches QuantConnect API response structure exactly
+ * Uses real statistics from LEAN results, no hardcoded values
  */
 function toQCBacktest(bt: LeanBacktest) {
   // Ensure numeric values (DB may return strings for numeric columns)
@@ -79,37 +80,62 @@ function toQCBacktest(bt: LeanBacktest) {
   const totalTrades = Number(bt.totalTrades) || 0;
   const cash = Number(bt.cash) || 100000;
 
-  // Build statistics dictionary (string keys matching QC format)
+  // Extended statistics from database (use actual values when available)
+  const alpha = bt.alpha != null ? Number(bt.alpha) : null;
+  const beta = bt.beta != null ? Number(bt.beta) : null;
+  const sortinoRatio = bt.sortinoRatio != null ? Number(bt.sortinoRatio) : null;
+  const treynorRatio = bt.treynorRatio != null ? Number(bt.treynorRatio) : null;
+  const informationRatio = bt.informationRatio != null ? Number(bt.informationRatio) : null;
+  const trackingError = bt.trackingError != null ? Number(bt.trackingError) : null;
+  const annualStdDev = bt.annualStdDev != null ? Number(bt.annualStdDev) : null;
+  const annualVariance = bt.annualVariance != null ? Number(bt.annualVariance) : null;
+  const totalFees = bt.totalFees != null ? Number(bt.totalFees) : 0;
+  const averageWin = bt.averageWin != null ? Number(bt.averageWin) : null;
+  const averageLoss = bt.averageLoss != null ? Number(bt.averageLoss) : null;
+  const endEquity = bt.endEquity != null ? Number(bt.endEquity) : cash * (1 + netProfit / 100);
+
+  // Helper to format number or return 'N/A'
+  const fmt = (val: number | null, decimals = 2, suffix = ''): string => {
+    if (val === null || isNaN(val)) return 'N/A';
+    return val.toFixed(decimals) + suffix;
+  };
+
+  const fmtCurrency = (val: number | null): string => {
+    if (val === null || isNaN(val)) return '$0.00';
+    return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // Build statistics dictionary - ALL values from LEAN results
   const statistics: Record<string, string> = {
     'Total Orders': String(totalTrades),
-    'Average Win': '0%',
-    'Average Loss': '0%',
+    'Average Win': fmt(averageWin, 2, '%'),
+    'Average Loss': fmt(averageLoss, 2, '%'),
     'Compounding Annual Return': `${(cagr * 100).toFixed(2)}%`,
     'Drawdown': `${(drawdown * 100).toFixed(2)}%`,
     'Expectancy': '0',
-    'Start Equity': String(cash),
-    'End Equity': String(Math.round(cash * (1 + netProfit / 100))),
+    'Start Equity': fmtCurrency(cash),
+    'End Equity': fmtCurrency(endEquity),
     'Net Profit': `${netProfit.toFixed(2)}%`,
-    'Sharpe Ratio': String(sharpeRatio.toFixed(3)),
-    'Sortino Ratio': '0',
+    'Sharpe Ratio': sharpeRatio.toFixed(3),
+    'Sortino Ratio': fmt(sortinoRatio, 3),
     'Probabilistic Sharpe Ratio': '0%',
     'Loss Rate': `${((1 - winRate) * 100).toFixed(0)}%`,
     'Win Rate': `${(winRate * 100).toFixed(0)}%`,
-    'Profit-Loss Ratio': String(profitLossRatio.toFixed(2)),
-    'Alpha': '0',
-    'Beta': '0',
-    'Annual Standard Deviation': '0',
-    'Annual Variance': '0',
-    'Information Ratio': '0',
-    'Tracking Error': '0',
-    'Treynor Ratio': '0',
-    'Total Fees': '$0.00',
+    'Profit-Loss Ratio': profitLossRatio.toFixed(2),
+    'Alpha': fmt(alpha, 4),
+    'Beta': fmt(beta, 4),
+    'Annual Standard Deviation': fmt(annualStdDev, 4),
+    'Annual Variance': fmt(annualVariance, 4),
+    'Information Ratio': fmt(informationRatio, 4),
+    'Tracking Error': fmt(trackingError, 4),
+    'Treynor Ratio': fmt(treynorRatio, 4),
+    'Total Fees': fmtCurrency(totalFees),
   };
 
   // Build runtime statistics
   const runtimeStatistics: Record<string, string> = {
-    'Equity': String(Math.round(cash * (1 + netProfit / 100))),
-    'Fees': '$0.00',
+    'Equity': fmtCurrency(endEquity),
+    'Fees': fmtCurrency(totalFees),
     'Holdings': '0',
     'Net Profit': `${netProfit.toFixed(2)}%`,
     'Return': `${netProfit.toFixed(2)}%`,
@@ -124,8 +150,8 @@ function toQCBacktest(bt: LeanBacktest) {
       winRate: winRate,
       lossRate: 1 - winRate,
       profitLossRatio: profitLossRatio,
-      averageProfit: 0,
-      averageLoss: 0,
+      averageProfit: averageWin || 0,
+      averageLoss: averageLoss || 0,
       averageProfitLoss: 0,
       totalProfit: 0,
       totalLoss: 0,
@@ -133,14 +159,22 @@ function toQCBacktest(bt: LeanBacktest) {
     },
     portfolioStatistics: {
       sharpeRatio: sharpeRatio,
+      sortinoRatio: sortinoRatio,
+      treynorRatio: treynorRatio,
       compoundingAnnualReturn: cagr,
       totalNetProfit: netProfit,
       drawdown: drawdown,
       startEquity: cash,
-      endEquity: cash * (1 + netProfit / 100),
+      endEquity: endEquity,
       winRate: winRate,
       lossRate: 1 - winRate,
       profitLossRatio: profitLossRatio,
+      alpha: alpha,
+      beta: beta,
+      informationRatio: informationRatio,
+      trackingError: trackingError,
+      annualStandardDeviation: annualStdDev,
+      annualVariance: annualVariance,
     },
     closedTrades: [],
   };
@@ -149,6 +183,7 @@ function toQCBacktest(bt: LeanBacktest) {
     backtestId: bt.backtestId,
     projectId: bt.projectId,
     name: bt.name,
+    note: bt.note || undefined,
     created: bt.createdAt.toISOString(),
     completed: bt.status === 'completed',
     status: mapStatus(bt.status),
@@ -507,6 +542,84 @@ router.post('/delete', async (req, res) => {
     });
   } catch (error) {
     logError('backtests/delete', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
+ * POST /backtests/abort - Abort a running backtest
+ */
+router.post('/abort', async (req, res) => {
+  const context = { endpoint: 'backtests/abort', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, backtestId } = req.body as { projectId: number; backtestId: string };
+    const userId = req.userId;
+
+    if (!projectId || !backtestId) {
+      return res.status(400).json({
+        success: false,
+        errors: ['projectId and backtestId are required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    // Check backtest exists and is running
+    const backtest = await queryOne<LeanBacktest>(
+      'SELECT * FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
+      [internalProjectId, backtestId]
+    );
+
+    if (!backtest) {
+      return res.status(404).json({
+        success: false,
+        errors: [`Backtest not found: ${backtestId}`],
+      });
+    }
+
+    if (backtest.status !== 'running' && backtest.status !== 'queued') {
+      return res.status(400).json({
+        success: false,
+        errors: [`Backtest is not running (status: ${backtest.status})`],
+      });
+    }
+
+    // Update status to aborted
+    await execute(
+      "UPDATE lean_backtests SET status = 'error', completed_at = NOW(), error_message = 'Aborted by user' WHERE project_id = $1 AND backtest_id = $2",
+      [internalProjectId, backtestId]
+    );
+
+    // Try to remove from queue if still queued
+    try {
+      const queue = getBacktestQueue();
+      const job = await queue.getJob(backtestId);
+      if (job) {
+        await job.remove();
+      }
+    } catch (queueError) {
+      // Job may have already started, that's ok
+      console.warn('[Backtest] Could not remove job from queue:', queueError);
+    }
+
+    res.json({
+      success: true,
+      errors: [],
+    });
+  } catch (error) {
+    logError('backtests/abort', error, context);
     const statusCode = getErrorStatusCode(error);
     res.status(statusCode).json({
       success: false,

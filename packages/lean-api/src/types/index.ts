@@ -27,6 +27,8 @@ export interface LeanBacktest {
   projectId: number;
   userId: string;
   name: string;
+  note: string | null;
+  description: string | null;
   status: 'queued' | 'running' | 'completed' | 'error';
   progress: number;
   startedAt: Date | null;
@@ -36,6 +38,7 @@ export interface LeanBacktest {
   startDate: Date;
   endDate: Date;
   cash: number;
+  // Core statistics
   netProfit: number | null;
   sharpeRatio: number | null;
   cagr: number | null;
@@ -43,8 +46,24 @@ export interface LeanBacktest {
   totalTrades: number | null;
   winRate: number | null;
   profitLossRatio: number | null;
+  // Extended statistics
+  alpha: number | null;
+  beta: number | null;
+  sortinoRatio: number | null;
+  treynorRatio: number | null;
+  informationRatio: number | null;
+  trackingError: number | null;
+  annualStdDev: number | null;
+  annualVariance: number | null;
+  totalFees: number | null;
+  averageWin: number | null;
+  averageLoss: number | null;
+  endEquity: number | null;
+  // JSON data
   resultJson: unknown;
   rollingWindow: unknown;
+  ordersJson: unknown;
+  insightsJson: unknown;
   createdAt: Date;
 }
 

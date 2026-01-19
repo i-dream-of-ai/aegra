@@ -330,10 +330,9 @@ async function parseLeanResults(resultsDir: string): Promise<LeanResult | null> 
 }
 
 /**
- * Extract statistics from LEAN results
- * Note: LEAN outputs use camelCase keys (statistics, totalPerformance)
+ * Extended statistics interface for comprehensive LEAN result extraction
  */
-function extractStatistics(results: LeanResult): {
+interface ExtendedStatistics {
   netProfit: number;
   sharpeRatio: number;
   cagr: number;
@@ -341,7 +340,26 @@ function extractStatistics(results: LeanResult): {
   totalTrades: number;
   winRate: number;
   profitLossRatio: number;
-} {
+  // Additional stats from LEAN
+  alpha: number | null;
+  beta: number | null;
+  sortinoRatio: number | null;
+  treynorRatio: number | null;
+  informationRatio: number | null;
+  trackingError: number | null;
+  annualStdDev: number | null;
+  annualVariance: number | null;
+  totalFees: number | null;
+  averageWin: number | null;
+  averageLoss: number | null;
+  endEquity: number | null;
+}
+
+/**
+ * Extract statistics from LEAN results
+ * Note: LEAN outputs use camelCase keys (statistics, totalPerformance)
+ */
+function extractStatistics(results: LeanResult): ExtendedStatistics {
   // LEAN uses camelCase in output JSON
   const rawResults = results as unknown as Record<string, unknown>;
   const stats = (rawResults.statistics || rawResults.Statistics || {}) as Record<string, string>;
@@ -360,6 +378,12 @@ function extractStatistics(results: LeanResult): {
   const parseNumber = (val: string | number | undefined): number => {
     if (val === undefined || val === null) return 0;
     return parseFloat(String(val)) || 0;
+  };
+
+  const parseNumberOrNull = (val: string | number | undefined): number | null => {
+    if (val === undefined || val === null) return null;
+    const num = parseFloat(String(val).replace(/[$%,]/g, ''));
+    return isNaN(num) ? null : num;
   };
 
   // Helper to safely extract value from unknown record
@@ -401,7 +425,36 @@ function extractStatistics(results: LeanResult): {
       stats['Profit-Loss Ratio'] ||
       getValue(tradeStats, 'profitLossRatio')
     ),
+    // Additional comprehensive statistics
+    alpha: parseNumberOrNull(stats['Alpha'] || getValue(portfolioStats, 'alpha')),
+    beta: parseNumberOrNull(stats['Beta'] || getValue(portfolioStats, 'beta')),
+    sortinoRatio: parseNumberOrNull(stats['Sortino Ratio'] || getValue(portfolioStats, 'sortinoRatio')),
+    treynorRatio: parseNumberOrNull(stats['Treynor Ratio'] || getValue(portfolioStats, 'treynorRatio')),
+    informationRatio: parseNumberOrNull(stats['Information Ratio'] || getValue(portfolioStats, 'informationRatio')),
+    trackingError: parseNumberOrNull(stats['Tracking Error'] || getValue(portfolioStats, 'trackingError')),
+    annualStdDev: parseNumberOrNull(stats['Annual Standard Deviation'] || getValue(portfolioStats, 'annualStandardDeviation')),
+    annualVariance: parseNumberOrNull(stats['Annual Variance'] || getValue(portfolioStats, 'annualVariance')),
+    totalFees: parseNumberOrNull(stats['Total Fees'] || getValue(tradeStats, 'totalFees')),
+    averageWin: parseNumberOrNull(stats['Average Win'] || getValue(tradeStats, 'averageWin')),
+    averageLoss: parseNumberOrNull(stats['Average Loss'] || getValue(tradeStats, 'averageLoss')),
+    endEquity: parseNumberOrNull(stats['End Equity'] || getValue(portfolioStats, 'endEquity')),
   };
+}
+
+/**
+ * Extract orders from LEAN results
+ */
+function extractOrders(results: LeanResult): Record<string, unknown> {
+  const rawResults = results as unknown as Record<string, unknown>;
+  return (rawResults.orders || rawResults.Orders || {}) as Record<string, unknown>;
+}
+
+/**
+ * Extract insights/alphas from LEAN results
+ */
+function extractInsights(results: LeanResult): unknown[] {
+  const rawResults = results as unknown as Record<string, unknown>;
+  return (rawResults.insights || rawResults.Insights || []) as unknown[];
 }
 
 /**
@@ -448,14 +501,10 @@ async function runLeanBacktest(
 ): Promise<{
   success: boolean;
   error?: string;
-  netProfit?: number;
-  sharpeRatio?: number;
-  cagr?: number;
-  drawdown?: number;
-  totalTrades?: number;
-  winRate?: number;
-  profitLossRatio?: number;
+  stats?: ExtendedStatistics;
   rollingWindow?: Record<string, unknown>;
+  ordersJson?: Record<string, unknown>;
+  insightsJson?: unknown[];
   resultJson?: unknown;
 }> {
   // Create workspace directories for this backtest
@@ -636,13 +685,19 @@ async function runLeanBacktest(
 
     const stats = extractStatistics(leanResults);
     const rollingWindow = extractChartData(leanResults);
+    const ordersJson = extractOrders(leanResults);
+    const insightsJson = extractInsights(leanResults);
 
     console.log('[LEAN] Extracted stats:', JSON.stringify(stats));
+    console.log('[LEAN] Orders count:', Object.keys(ordersJson).length);
+    console.log('[LEAN] Insights count:', insightsJson.length);
 
     return {
       success: true,
-      ...stats,
+      stats,
       rollingWindow,
+      ordersJson,
+      insightsJson,
       resultJson: leanResults,
     };
 
@@ -662,26 +717,80 @@ async function runLeanBacktest(
 
 /**
  * Extract symbols from algorithm code
+ * Handles multiple patterns: equity, crypto, forex, futures, and variable assignments
  */
 function extractSymbols(code: string): string[] {
-  const symbols: string[] = [];
-  const patterns = [
-    /add_equity\s*\(\s*["']([A-Z]+)["']/gi,
-    /AddEquity\s*\(\s*["']([A-Z]+)["']/gi,
-    /self\.add_equity\s*\(\s*["']([A-Z]+)["']/gi,
-    /self\.AddEquity\s*\(\s*["']([A-Z]+)["']/gi,
+  const symbols = new Set<string>();
+
+  // Patterns for various add methods (Python snake_case and C# PascalCase)
+  const addPatterns = [
+    // Equity
+    /(?:self\.)?add_equity\s*\(\s*["']([A-Z0-9.]+)["']/gi,
+    /(?:this\.)?AddEquity\s*\(\s*["']([A-Z0-9.]+)["']/gi,
+    // ETF (same as equity but explicit pattern)
+    /(?:self\.)?add_equity\s*\(\s*["']([A-Z]{2,5})["']/gi,
+    // Crypto
+    /(?:self\.)?add_crypto\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddCrypto\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // Forex
+    /(?:self\.)?add_forex\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddForex\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // CFD
+    /(?:self\.)?add_cfd\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddCfd\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // Future
+    /(?:self\.)?add_future\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddFuture\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // Option (underlying symbol)
+    /(?:self\.)?add_option\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddOption\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // Index
+    /(?:self\.)?add_index\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    /(?:this\.)?AddIndex\s*\(\s*["']([A-Z0-9]+)["']/gi,
+    // set_holdings with symbol as first arg
+    /(?:self\.)?set_holdings\s*\(\s*["']([A-Z0-9.]+)["']/gi,
+    /(?:this\.)?SetHoldings\s*\(\s*["']([A-Z0-9.]+)["']/gi,
   ];
 
-  for (const pattern of patterns) {
+  // Extract symbols from add* method calls
+  for (const pattern of addPatterns) {
     let match;
+    pattern.lastIndex = 0; // Reset regex state
     while ((match = pattern.exec(code)) !== null) {
-      if (!symbols.includes(match[1])) {
-        symbols.push(match[1]);
+      const symbol = match[1].toUpperCase();
+      // Filter out very short or very long symbols, and common false positives
+      if (symbol.length >= 1 && symbol.length <= 10 && !['TRUE', 'FALSE', 'NONE', 'NULL'].includes(symbol)) {
+        symbols.add(symbol);
       }
     }
   }
 
-  return symbols;
+  // Also look for common symbol variable assignments like: symbol = "SPY" or SYMBOL = "AAPL"
+  const assignmentPattern = /(?:symbol|ticker|equity)\s*=\s*["']([A-Z0-9.]+)["']/gi;
+  let match;
+  while ((match = assignmentPattern.exec(code)) !== null) {
+    const symbol = match[1].toUpperCase();
+    if (symbol.length >= 1 && symbol.length <= 10) {
+      symbols.add(symbol);
+    }
+  }
+
+  // Look for symbols in list literals like: symbols = ["SPY", "QQQ", "IWM"]
+  const listPattern = /(?:symbols|tickers|equities)\s*=\s*\[([^\]]+)\]/gi;
+  while ((match = listPattern.exec(code)) !== null) {
+    const listContent = match[1];
+    const symbolMatches = listContent.match(/["']([A-Z0-9.]+)["']/g);
+    if (symbolMatches) {
+      for (const sm of symbolMatches) {
+        const symbol = sm.replace(/["']/g, '').toUpperCase();
+        if (symbol.length >= 1 && symbol.length <= 10) {
+          symbols.add(symbol);
+        }
+      }
+    }
+  }
+
+  return Array.from(symbols);
 }
 
 /**
@@ -792,7 +901,8 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       throw new Error(result.error || 'Backtest failed');
     }
 
-    // Store results
+    // Store results with comprehensive statistics
+    const stats = result.stats!;
     await execute(
       `UPDATE lean_backtests SET
          status = 'completed',
@@ -806,19 +916,47 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
          win_rate = $7,
          profit_loss_ratio = $8,
          rolling_window = $9,
-         result_json = $10
+         result_json = $10,
+         orders_json = $11,
+         insights_json = $12,
+         alpha = $13,
+         beta = $14,
+         sortino_ratio = $15,
+         treynor_ratio = $16,
+         information_ratio = $17,
+         tracking_error = $18,
+         annual_std_dev = $19,
+         annual_variance = $20,
+         total_fees = $21,
+         average_win = $22,
+         average_loss = $23,
+         end_equity = $24
        WHERE backtest_id = $1`,
       [
         backtestId,
-        result.netProfit,
-        result.sharpeRatio,
-        result.cagr,
-        result.drawdown,
-        result.totalTrades,
-        result.winRate,
-        result.profitLossRatio,
+        stats.netProfit,
+        stats.sharpeRatio,
+        stats.cagr,
+        stats.drawdown,
+        stats.totalTrades,
+        stats.winRate,
+        stats.profitLossRatio,
         JSON.stringify(result.rollingWindow),
         JSON.stringify(result.resultJson),
+        JSON.stringify(result.ordersJson),
+        JSON.stringify(result.insightsJson),
+        stats.alpha,
+        stats.beta,
+        stats.sortinoRatio,
+        stats.treynorRatio,
+        stats.informationRatio,
+        stats.trackingError,
+        stats.annualStdDev,
+        stats.annualVariance,
+        stats.totalFees,
+        stats.averageWin,
+        stats.averageLoss,
+        stats.endEquity,
       ]
     );
 
