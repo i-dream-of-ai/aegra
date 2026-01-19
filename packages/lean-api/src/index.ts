@@ -27,6 +27,7 @@ import filesRouter from './routes/files.js';
 import compileRouter from './routes/compile.js';
 import backtestsRouter from './routes/backtests.js';
 import optimizationsRouter from './routes/optimizations.js';
+import leanRouter from './routes/lean.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -69,6 +70,7 @@ app.use('/api/v2/files', filesRouter);
 app.use('/api/v2/compile', compileRouter);
 app.use('/api/v2/backtests', backtestsRouter);
 app.use('/api/v2/optimizations', optimizationsRouter);
+app.use('/api/v2/lean', leanRouter);
 
 // 404 handler for unknown routes
 app.use((req, res) => {

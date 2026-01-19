@@ -215,6 +215,117 @@ class ${className}Algorithm(QCAlgorithm):
 });
 
 /**
+ * POST /projects/update - Update project name or description
+ */
+router.post('/update', async (req, res) => {
+  const context = { endpoint: 'projects/update', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, name, description } = req.body as {
+      projectId: number;
+      name?: string;
+      description?: string;
+    };
+    const userId = req.userId;
+
+    if (!projectId) {
+      return res.status(400).json({
+        success: false,
+        projects: [],
+        errors: ['projectId is required'],
+      });
+    }
+
+    if (name !== undefined && name.length > 100) {
+      return res.status(400).json({
+        success: false,
+        projects: [],
+        errors: ['Project name must be 100 characters or less'],
+      });
+    }
+
+    // Build dynamic update query
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+    if (description !== undefined) {
+      updates.push(`description = $${paramIndex++}`);
+      values.push(description);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        projects: [],
+        errors: ['No fields to update (provide name or description)'],
+      });
+    }
+
+    updates.push(`modified_at = NOW()`);
+    values.push(projectId, userId);
+
+    const project = await queryOne<LeanProject>(
+      `UPDATE lean_projects SET ${updates.join(', ')}
+       WHERE id = $${paramIndex++} AND user_id = $${paramIndex}
+       RETURNING *`,
+      values
+    );
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        projects: [],
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    res.json({
+      success: true,
+      projects: [toQCProject(project)],
+      errors: [],
+    });
+  } catch (error) {
+    logError('projects/update', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      projects: [],
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
+ * POST /projects/nodes/read - List project nodes (stub for self-hosted)
+ * Returns empty list since self-hosted doesn't support live trading nodes
+ */
+router.post('/nodes/read', async (req, res) => {
+  // Self-hosted doesn't support live trading nodes
+  res.json({
+    success: true,
+    nodes: [],
+    errors: [],
+  });
+});
+
+/**
+ * POST /projects/nodes/update - Update project nodes (stub for self-hosted)
+ * Returns success but does nothing since self-hosted doesn't support live trading
+ */
+router.post('/nodes/update', async (req, res) => {
+  res.json({
+    success: true,
+    errors: [],
+    message: 'Live trading nodes not supported in self-hosted mode',
+  });
+});
+
+/**
  * POST /projects/delete - Delete a project (and all associated files/backtests)
  */
 router.post('/delete', async (req, res) => {
