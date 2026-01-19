@@ -97,6 +97,120 @@ async function exportMarketDataForLean(
 }
 
 /**
+ * Generate map file for a symbol
+ * Map files track ticker symbol changes over time
+ * Format: YYYYMMDD,ticker,exchange (e.g., 19980102,aapl,Q)
+ *
+ * Exchange codes:
+ * - Q = NASDAQ
+ * - N = NYSE
+ * - A = AMEX
+ * - P = NYSE Arca
+ * - Z = BATS
+ * - V = IEX
+ */
+async function generateMapFile(
+  symbol: string,
+  dataDir: string,
+  startDate: Date
+): Promise<void> {
+  const mapFilesDir = path.join(dataDir, 'equity', 'usa', 'map_files');
+  await fs.mkdir(mapFilesDir, { recursive: true });
+
+  const symbolLower = symbol.toLowerCase();
+
+  // Format start date as YYYYMMDD
+  const formatDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+  };
+
+  // Use a date before any possible backtest start (1998 is when QC data starts)
+  const historicalStart = new Date(1998, 0, 2);
+  // Use the earlier of the backtest start or 1998
+  const effectiveStart = startDate < historicalStart ? startDate : historicalStart;
+
+  // End date far in the future
+  const futureEnd = new Date(2050, 11, 31);
+
+  // Default to NASDAQ (Q) - most common for modern equities
+  // This could be enhanced to look up actual exchange from a database
+  const exchange = 'Q';
+
+  const mapContent = [
+    `${formatDate(effectiveStart)},${symbolLower},${exchange}`,
+    `${formatDate(futureEnd)},${symbolLower},${exchange}`,
+  ].join('\n');
+
+  const mapFilePath = path.join(mapFilesDir, `${symbolLower}.csv`);
+  await fs.writeFile(mapFilePath, mapContent);
+  console.log(`[LEAN Data] Created map file: ${mapFilePath}`);
+}
+
+/**
+ * Generate factor file for a symbol
+ * Factor files track split and dividend adjustments
+ * Format: YYYYMMDD,price_factor,split_factor,reference_price
+ *
+ * For symbols without known corporate actions, we create a simple file
+ * with factor 1.0 (no adjustments) throughout the backtest period.
+ */
+async function generateFactorFile(
+  symbol: string,
+  dataDir: string,
+  startDate: Date,
+  referencePrice: number = 0
+): Promise<void> {
+  const factorFilesDir = path.join(dataDir, 'equity', 'usa', 'factor_files');
+  await fs.mkdir(factorFilesDir, { recursive: true });
+
+  const symbolLower = symbol.toLowerCase();
+
+  const formatDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+  };
+
+  // Use a date before any possible backtest start
+  const historicalStart = new Date(1998, 0, 2);
+  const effectiveStart = startDate < historicalStart ? startDate : historicalStart;
+
+  // End date far in the future
+  const futureEnd = new Date(2050, 11, 31);
+
+  // Factor file format: date,price_factor,split_factor,reference_price
+  // price_factor = 1.0 means no dividend adjustment
+  // split_factor = 1.0 means no split adjustment
+  // reference_price = 0 for most entries, closing price for final entry
+  const factorContent = [
+    `${formatDate(effectiveStart)},1,1,0`,
+    `${formatDate(futureEnd)},1,1,${referencePrice}`,
+  ].join('\n');
+
+  const factorFilePath = path.join(factorFilesDir, `${symbolLower}.csv`);
+  await fs.writeFile(factorFilePath, factorContent);
+  console.log(`[LEAN Data] Created factor file: ${factorFilePath}`);
+}
+
+/**
+ * Generate all auxiliary data files for a symbol (map files and factor files)
+ * These are required for LEAN to properly resolve symbols and adjust prices
+ */
+async function generateAuxiliaryDataFiles(
+  symbol: string,
+  dataDir: string,
+  startDate: Date,
+  referencePrice: number = 0
+): Promise<void> {
+  await generateMapFile(symbol, dataDir, startDate);
+  await generateFactorFile(symbol, dataDir, startDate, referencePrice);
+}
+
+/**
  * Copy LEAN static data files (symbol-properties, market-hours)
  * These are required for LEAN to run and should be downloaded once
  */
@@ -183,10 +297,11 @@ function createLeanConfig(
     'messaging-handler': 'QuantConnect.Messaging.Messaging',
     'job-queue-handler': 'QuantConnect.Queues.JobQueue',
     'api-handler': 'QuantConnect.Api.Api',
-    // Use LocalZipMapFileProvider which doesn't require map_files directory on disk
-    // This avoids errors when running without full QC data infrastructure
-    'map-file-provider': 'QuantConnect.Data.Auxiliary.LocalZipMapFileProvider',
-    'factor-file-provider': 'QuantConnect.Data.Auxiliary.LocalZipFactorFileProvider',
+    // Use LocalDiskMapFileProvider and LocalDiskFactorFileProvider
+    // We generate map_files and factor_files for each symbol before running LEAN
+    // These files are placed in /Data/equity/usa/map_files/ and /Data/equity/usa/factor_files/
+    'map-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider',
+    'factor-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider',
     'data-provider': 'QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider',
     'alpha-handler': 'QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler',
     'data-channel-provider': 'DataChannelProvider',
@@ -396,13 +511,20 @@ async function runLeanBacktest(
 
     await onProgress(30);
 
-    // Export market data for each symbol
+    // Export market data and generate auxiliary files for each symbol
     for (const symbol of symbols) {
       const bars = await getDailyBars(symbol, startDate, endDate);
       if (bars.length > 0) {
         await exportMarketDataForLean(symbol, bars, dataDir);
+        // Get the last closing price for the factor file reference price
+        const lastBar = bars[bars.length - 1];
+        const referencePrice = Number(lastBar.close);
+        // Generate map file and factor file for this symbol
+        await generateAuxiliaryDataFiles(symbol, dataDir, startDate, referencePrice);
       } else {
         console.warn(`[LEAN Data] No data for ${symbol} in date range`);
+        // Still generate auxiliary files even without data, so LEAN can at least try to resolve the symbol
+        await generateAuxiliaryDataFiles(symbol, dataDir, startDate, 0);
       }
     }
 
@@ -442,6 +564,32 @@ async function runLeanBacktest(
     console.log('[LEAN] Data dir:', dataDir);
     console.log('[LEAN] Results dir:', resultsDir);
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
+
+    // Log the data directory structure for debugging
+    try {
+      const logDirContents = async (dir: string, prefix: string = '') => {
+        try {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              console.log(`[LEAN Data Structure] ${prefix}${entry.name}/`);
+              await logDirContents(fullPath, prefix + '  ');
+            } else {
+              const stats = await fs.stat(fullPath);
+              console.log(`[LEAN Data Structure] ${prefix}${entry.name} (${stats.size} bytes)`);
+            }
+          }
+        } catch (e) {
+          console.log(`[LEAN Data Structure] ${prefix}(error reading: ${e})`);
+        }
+      };
+      console.log('[LEAN Data Structure] === Data Directory Contents ===');
+      await logDirContents(dataDir);
+      console.log('[LEAN Data Structure] === End Data Directory ===');
+    } catch (e) {
+      console.error('[LEAN] Error logging data directory:', e);
+    }
 
     const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const proc = spawn('docker', dockerArgs);
