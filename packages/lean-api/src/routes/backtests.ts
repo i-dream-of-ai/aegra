@@ -425,6 +425,70 @@ router.post('/delete', async (req, res) => {
 });
 
 /**
+ * POST /backtests/orders/read - Get order history for a backtest
+ */
+router.post('/orders/read', async (req, res) => {
+  const context = { endpoint: 'backtests/orders/read', userId: req.userId, body: req.body };
+
+  try {
+    const { projectId, backtestId } = req.body as { projectId: number; backtestId: string };
+    const userId = req.userId;
+
+    if (!projectId || !backtestId) {
+      return res.status(400).json({
+        success: false,
+        orders: [],
+        errors: ['projectId and backtestId are required'],
+      });
+    }
+
+    // Look up internal project id from QC project id
+    const internalProjectId = await getProjectByQcId(projectId, userId);
+    if (!internalProjectId) {
+      return res.status(404).json({
+        success: false,
+        orders: [],
+        errors: ['Project not found or access denied'],
+      });
+    }
+
+    const backtest = await queryOne<LeanBacktest>(
+      'SELECT result_json FROM lean_backtests WHERE project_id = $1 AND backtest_id = $2',
+      [internalProjectId, backtestId]
+    );
+
+    if (!backtest) {
+      return res.status(404).json({
+        success: false,
+        orders: [],
+        errors: [`Backtest not found: ${backtestId}`],
+      });
+    }
+
+    // Extract orders from result_json
+    const resultJson = backtest.resultJson as Record<string, unknown> || {};
+    const orders = (resultJson.orders || resultJson.Orders || {}) as Record<string, unknown>;
+
+    // Convert orders object to array format expected by QC API
+    const ordersArray = Object.values(orders);
+
+    res.json({
+      success: true,
+      orders: ordersArray,
+      errors: [],
+    });
+  } catch (error) {
+    logError('backtests/orders/read', error, context);
+    const statusCode = getErrorStatusCode(error);
+    res.status(statusCode).json({
+      success: false,
+      orders: [],
+      errors: [formatErrorForResponse(error)],
+    });
+  }
+});
+
+/**
  * POST /backtests/chart/read - Get chart data for a backtest
  */
 router.post('/chart/read', async (req, res) => {
