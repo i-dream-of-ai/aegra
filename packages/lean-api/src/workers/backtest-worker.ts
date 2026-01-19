@@ -17,6 +17,14 @@ import { createWriteStream } from 'fs';
 // Path to LEAN static data files (downloaded once)
 const LEAN_STATIC_DATA_DIR = process.env.LEAN_STATIC_DATA_DIR || path.join(process.cwd(), 'data', 'lean-static');
 
+// Workspace directory for LEAN backtests - must be accessible from both this container AND the Docker host
+// When using sibling containers (Docker socket mounting), paths must exist on the host
+const LEAN_WORKSPACES_DIR = process.env.LEAN_WORKSPACES_DIR || '/app/workspaces';
+
+// Host path mapping - needed for sibling container pattern
+// The container sees /app/workspaces but Docker daemon sees the host-mounted path
+const LEAN_HOST_WORKSPACES_DIR = process.env.LEAN_HOST_WORKSPACES_DIR || LEAN_WORKSPACES_DIR;
+
 // LEAN result types
 interface LeanResult {
   Statistics?: Record<string, string>;
@@ -346,11 +354,20 @@ async function runLeanBacktest(
   rollingWindow?: Record<string, unknown>;
   resultJson?: unknown;
 }> {
-  // Create temp directories for this backtest
-  const tempBase = path.join(os.tmpdir(), `lean-backtest-${projectId}-${Date.now()}`);
+  // Create workspace directories for this backtest
+  // Uses shared volume accessible from both this container and the Docker host
+  const workspaceId = `${projectId}-${Date.now()}`;
+  const tempBase = path.join(LEAN_WORKSPACES_DIR, `lean-backtest-${workspaceId}`);
   const algorithmDir = path.join(tempBase, 'algorithm');
   const dataDir = path.join(tempBase, 'data');
   const resultsDir = path.join(tempBase, 'results');
+
+  // Host paths for Docker volume mounts (when using sibling container pattern)
+  const hostTempBase = path.join(LEAN_HOST_WORKSPACES_DIR, `lean-backtest-${workspaceId}`);
+  const hostAlgorithmDir = path.join(hostTempBase, 'algorithm');
+  const hostDataDir = path.join(hostTempBase, 'data');
+  const hostResultsDir = path.join(hostTempBase, 'results');
+  const hostConfigPath = path.join(hostTempBase, 'config.json');
 
   try {
     await fs.mkdir(algorithmDir, { recursive: true });
@@ -393,13 +410,14 @@ async function runLeanBacktest(
     const dockerImage = process.env.LEAN_DOCKER_IMAGE || 'quantconnect/lean:latest';
 
     // LEAN needs command-line arguments to use our config properly
+    // Use HOST paths for volume mounts when using sibling container pattern
     const dockerArgs = [
       'run',
       '--rm',
-      '-v', `${algorithmDir}:/Algorithm:ro`,
-      '-v', `${dataDir}:/Data:ro`,
-      '-v', `${resultsDir}:/Results`,
-      '-v', `${configPath}:/Lean/config.json:ro`,
+      '-v', `${hostAlgorithmDir}:/Algorithm:ro`,
+      '-v', `${hostDataDir}:/Data:ro`,
+      '-v', `${hostResultsDir}:/Results`,
+      '-v', `${hostConfigPath}:/Lean/config.json:ro`,
       '--memory', process.env.LEAN_MEMORY_LIMIT || '4g',
       '--cpus', process.env.LEAN_CPU_LIMIT || '2',
       dockerImage,

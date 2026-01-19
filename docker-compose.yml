@@ -48,6 +48,17 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ENABLE_WORKERS=true
+      # Path inside container where workspaces are stored
+      - LEAN_WORKSPACES_DIR=/app/workspaces
+      # Host path for Docker volume mounts (sibling container pattern)
+      # This must match the bind mount source path
+      - LEAN_HOST_WORKSPACES_DIR=${LEAN_HOST_WORKSPACES_DIR:-/tmp/lean-workspaces}
+    volumes:
+      # Mount Docker socket for running LEAN containers (sibling container pattern)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Bind mount for LEAN workspaces - uses same host path as LEAN_HOST_WORKSPACES_DIR
+      # This allows both lean-api AND spawned LEAN containers to access the same files
+      - ${LEAN_HOST_WORKSPACES_DIR:-/tmp/lean-workspaces}:/app/workspaces
     depends_on:
       redis:
         condition: service_healthy

@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+# Install Docker CLI for running LEAN containers via mounted socket
+RUN apk add --no-cache docker-cli
+
 WORKDIR /app
 
 # Copy package files
