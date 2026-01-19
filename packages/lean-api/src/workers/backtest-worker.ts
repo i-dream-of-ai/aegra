@@ -6,6 +6,15 @@
 import { Worker, Job } from 'bullmq';
 import { query, queryOne, execute } from '../services/database.js';
 import { ensureMultipleSymbolsCached, getDailyBars } from '../services/market-data.js';
+import {
+  isS3Enabled,
+  isSymbolCachedInS3,
+  ensureSymbolLocallyAvailable,
+  uploadSymbolToS3,
+  ensureStaticDataAvailable,
+  getLocalCacheDir,
+  getHostCacheDir,
+} from '../services/s3-cache.js';
 import type { BacktestJobData, LeanFile, MarketDataDaily } from '../types/index.js';
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
@@ -14,9 +23,6 @@ import * as os from 'os';
 import archiver from 'archiver';
 import { createWriteStream } from 'fs';
 
-// Path to LEAN static data files (downloaded once)
-const LEAN_STATIC_DATA_DIR = process.env.LEAN_STATIC_DATA_DIR || path.join(process.cwd(), 'data', 'lean-static');
-
 // Workspace directory for LEAN backtests - must be accessible from both this container AND the Docker host
 // When using sibling containers (Docker socket mounting), paths must exist on the host
 const LEAN_WORKSPACES_DIR = process.env.LEAN_WORKSPACES_DIR || '/app/workspaces';
@@ -24,11 +30,6 @@ const LEAN_WORKSPACES_DIR = process.env.LEAN_WORKSPACES_DIR || '/app/workspaces'
 // Host path mapping - needed for sibling container pattern
 // The container sees /app/workspaces but Docker daemon sees the host-mounted path
 const LEAN_HOST_WORKSPACES_DIR = process.env.LEAN_HOST_WORKSPACES_DIR || LEAN_WORKSPACES_DIR;
-
-// Persistent LEAN data cache - stores pre-generated LEAN format data (zips, map files, factor files)
-// This is a SHARED volume that persists across backtests - data is generated once and reused
-const LEAN_DATA_CACHE_DIR = process.env.LEAN_DATA_CACHE_DIR || '/app/lean-data-cache';
-const LEAN_HOST_DATA_CACHE_DIR = process.env.LEAN_HOST_DATA_CACHE_DIR || LEAN_DATA_CACHE_DIR;
 
 // LEAN result types
 interface LeanResult {
@@ -54,13 +55,21 @@ interface LeanResult {
 }
 
 /**
- * Check if LEAN data exists in the persistent cache
+ * Check if LEAN data exists in cache (local or S3)
+ * If in S3 but not local, downloads it
  */
 async function isDataCached(symbol: string): Promise<boolean> {
+  // First check if S3 is enabled - if so, use S3 cache logic
+  if (isS3Enabled()) {
+    return ensureSymbolLocallyAvailable(symbol);
+  }
+
+  // Fallback to local-only check
   const symbolLower = symbol.toLowerCase();
-  const zipPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
-  const mapPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'map_files', `${symbolLower}.csv`);
-  const factorPath = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'factor_files', `${symbolLower}.csv`);
+  const cacheDir = getLocalCacheDir();
+  const zipPath = path.join(cacheDir, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
+  const mapPath = path.join(cacheDir, 'equity', 'usa', 'map_files', `${symbolLower}.csv`);
+  const factorPath = path.join(cacheDir, 'equity', 'usa', 'factor_files', `${symbolLower}.csv`);
 
   try {
     await Promise.all([
@@ -85,9 +94,10 @@ async function exportMarketDataToCache(
   bars: MarketDataDaily[]
 ): Promise<void> {
   const symbolLower = symbol.toLowerCase();
+  const cacheDir = getLocalCacheDir();
 
   // Store in persistent cache
-  const symbolDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'daily');
+  const symbolDir = path.join(cacheDir, 'equity', 'usa', 'daily');
   await fs.mkdir(symbolDir, { recursive: true });
 
   // Create CSV content in LEAN format (no header, prices * 10000)
@@ -129,7 +139,8 @@ async function generateMapFileToCache(
   symbol: string,
   startDate: Date
 ): Promise<void> {
-  const mapFilesDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'map_files');
+  const cacheDir = getLocalCacheDir();
+  const mapFilesDir = path.join(cacheDir, 'equity', 'usa', 'map_files');
   await fs.mkdir(mapFilesDir, { recursive: true });
 
   const symbolLower = symbol.toLowerCase();
@@ -164,7 +175,8 @@ async function generateFactorFileToCache(
   startDate: Date,
   referencePrice: number = 0
 ): Promise<void> {
-  const factorFilesDir = path.join(LEAN_DATA_CACHE_DIR, 'equity', 'usa', 'factor_files');
+  const cacheDir = getLocalCacheDir();
+  const factorFilesDir = path.join(cacheDir, 'equity', 'usa', 'factor_files');
   await fs.mkdir(factorFilesDir, { recursive: true });
 
   const symbolLower = symbol.toLowerCase();
@@ -192,6 +204,7 @@ async function generateFactorFileToCache(
 
 /**
  * Ensure symbol data exists in persistent cache - generates if missing
+ * If S3 is enabled, uploads generated data to S3 for future reuse
  */
 async function ensureSymbolInCache(
   symbol: string,
@@ -216,70 +229,21 @@ async function ensureSymbolInCache(
     await generateMapFileToCache(symbol, startDate);
     await generateFactorFileToCache(symbol, startDate, 0);
   }
-}
 
-/**
- * Copy LEAN static data files (symbol-properties, market-hours)
- * These are required for LEAN to run and should be downloaded once
- */
-async function copyLeanStaticData(dataDir: string): Promise<void> {
-  const staticDirs = ['symbol-properties', 'market-hours'];
-
-  for (const dir of staticDirs) {
-    const srcDir = path.join(LEAN_STATIC_DATA_DIR, dir);
-    const destDir = path.join(dataDir, dir);
-
-    try {
-      await fs.access(srcDir);
-      await fs.mkdir(destDir, { recursive: true });
-
-      const files = await fs.readdir(srcDir);
-      for (const file of files) {
-        await fs.copyFile(path.join(srcDir, file), path.join(destDir, file));
-      }
-      console.log(`[LEAN Data] Copied ${dir} static data`);
-    } catch {
-      console.warn(`[LEAN Data] Static data not found at ${srcDir}, downloading...`);
-      await downloadLeanStaticData(dir, destDir);
-    }
+  // Upload to S3/DO Spaces for persistence across deployments
+  if (isS3Enabled()) {
+    console.log(`[LEAN Data Cache] Uploading ${symbol} to DO Spaces...`);
+    await uploadSymbolToS3(symbol);
   }
 }
 
 /**
- * Download LEAN static data file from GitHub
+ * Ensure LEAN static data files are available (symbol-properties, market-hours)
+ * Uses S3 cache service to download from S3/GitHub as needed
  */
-async function downloadLeanStaticData(type: string, destDir: string): Promise<void> {
-  await fs.mkdir(destDir, { recursive: true });
-
-  const files: Record<string, string> = {
-    'symbol-properties': 'symbol-properties-database.csv',
-    'market-hours': 'market-hours-database.json',
-  };
-
-  const filename = files[type];
-  if (!filename) {
-    console.warn(`[LEAN Data] Unknown static data type: ${type}`);
-    return;
-  }
-
-  const url = `https://raw.githubusercontent.com/QuantConnect/Lean/master/Data/${type}/${filename}`;
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const content = await response.text();
-    await fs.writeFile(path.join(destDir, filename), content);
-    console.log(`[LEAN Data] Downloaded ${type}/${filename}`);
-
-    // Also cache it in the static data dir for future use
-    const cacheDir = path.join(LEAN_STATIC_DATA_DIR, type);
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(path.join(cacheDir, filename), content);
-  } catch (error) {
-    console.error(`[LEAN Data] Failed to download ${type}/${filename}:`, error);
-  }
+async function ensureLeanStaticData(): Promise<void> {
+  // Use the S3 cache service which handles local check, S3 download, and GitHub fallback
+  await ensureStaticDataAvailable();
 }
 
 /**
@@ -497,7 +461,7 @@ async function runLeanBacktest(
     await fs.mkdir(resultsDir, { recursive: true });
 
     // Ensure persistent cache has static data (symbol-properties, market-hours)
-    await copyLeanStaticData(LEAN_DATA_CACHE_DIR);
+    await ensureLeanStaticData();
 
     await onProgress(15);
 
@@ -536,11 +500,12 @@ async function runLeanBacktest(
 
     // Mount persistent data cache as /Data (read-only)
     // Algorithm and results are per-backtest
+    const hostDataCacheDir = getHostCacheDir();
     const dockerArgs = [
       'run',
       '--rm',
       '-v', `${hostAlgorithmDir}:/Algorithm:ro`,
-      '-v', `${LEAN_HOST_DATA_CACHE_DIR}:/Data:ro`,  // Persistent cache!
+      '-v', `${hostDataCacheDir}:/Data:ro`,  // Persistent cache from S3/local
       '-v', `${hostResultsDir}:/Results`,
       '-v', `${hostConfigPath}:/Lean/config.json:ro`,
       '--memory', process.env.LEAN_MEMORY_LIMIT || '4g',
@@ -552,10 +517,13 @@ async function runLeanBacktest(
       '--config', '/Lean/config.json',
     ];
 
+    const localCacheDir = getLocalCacheDir();
     console.log('[LEAN] Starting Docker container...');
     console.log('[LEAN] Command: docker', dockerArgs.join(' '));
     console.log('[LEAN] Algorithm dir:', algorithmDir);
-    console.log('[LEAN] Data cache:', LEAN_DATA_CACHE_DIR);
+    console.log('[LEAN] Data cache (local):', localCacheDir);
+    console.log('[LEAN] Data cache (host mount):', hostDataCacheDir);
+    console.log('[LEAN] S3 enabled:', isS3Enabled());
     console.log('[LEAN] Results dir:', resultsDir);
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
 
