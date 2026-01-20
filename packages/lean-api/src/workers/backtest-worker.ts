@@ -1007,9 +1007,11 @@ async function runLeanBacktest(
     await onProgress(50);
 
     // Run LEAN Docker container
-    // Use latest LEAN image from QuantConnect main branch
-    // See: https://hub.docker.com/r/quantconnect/lean
-    const dockerImage = process.env.LEAN_DOCKER_IMAGE || 'quantconnect/lean:latest';
+    // Use pinned LEAN image version for stability
+    // See: https://hub.docker.com/r/quantconnect/lean/tags
+    // Note: 'latest' tag from Jan 16, 2026 has assembly issues with System.Private.ServiceModel.dll
+    // Using 17469 from Jan 9, 2026 which is known to work
+    const dockerImage = process.env.LEAN_DOCKER_IMAGE || 'quantconnect/lean:17469';
 
     // Mount persistent data cache as /Data (read-only)
     // Algorithm and results are per-backtest
