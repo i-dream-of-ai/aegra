@@ -912,6 +912,7 @@ function extractChartData(results: LeanResult): Record<string, unknown> {
  *
  * @param onChartUpdate - Optional callback for real-time chart updates via ZeroMQ streaming
  *                        When provided, LEAN will use StreamingMessageHandler to push chart data
+ * @param userId - User ID for fetching their API keys (Alpaca, Alpha Vantage) for market data
  */
 async function runLeanBacktest(
   projectId: number,
@@ -922,7 +923,8 @@ async function runLeanBacktest(
   cash: number,
   parameters: Record<string, unknown>,
   onProgress: (progress: number) => Promise<void>,
-  onChartUpdate?: OnChartUpdate
+  onChartUpdate?: OnChartUpdate,
+  userId?: string
 ): Promise<{
   success: boolean;
   error?: string;
@@ -969,9 +971,9 @@ async function runLeanBacktest(
     await onProgress(20);
 
     // Ensure market data is cached from provider (Alpha Vantage, Alpaca, etc.)
-    // This fetches from API if not in DB
-    console.log(`[LEAN Data] Ensuring market data in DB for symbols: ${symbols.join(', ')}`);
-    await ensureMultipleSymbolsCached(symbols, startDate, endDate);
+    // Uses user's own API keys for data licensing compliance
+    console.log(`[LEAN Data] Ensuring market data in DB for symbols: ${symbols.join(', ')} (user: ${userId || 'platform'})`);
+    await ensureMultipleSymbolsCached(symbols, startDate, endDate, userId, 'alpaca');
 
     await onProgress(30);
 
@@ -1472,12 +1474,15 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
     await updateProgress(5);
 
     // Ensure market data is cached for the algorithm's date range
+    // Uses user's own API keys (Alpaca/Alpha Vantage) for data licensing compliance
     if (symbols.length > 0) {
-      console.log('[Backtest Worker] Caching market data...');
+      console.log(`[Backtest Worker] Caching market data for user ${userId}...`);
       const dataResult = await ensureMultipleSymbolsCached(
         symbols,
         dataStartDate,
-        dataEndDate
+        dataEndDate,
+        userId,      // Pass userId to use their API keys
+        'alpaca'     // Prefer Alpaca (free unlimited data)
       );
       // Track data points fetched (estimate based on symbols * days)
       const days = Math.ceil((dataEndDate.getTime() - dataStartDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -1514,7 +1519,8 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       cash,
       parameters,
       updateProgress,
-      onChartUpdate  // Enable chart streaming via file polling
+      onChartUpdate,  // Enable chart streaming via file polling
+      userId          // Pass userId for their API keys
     );
 
     const leanDurationSeconds = (Date.now() - leanStartTime) / 1000;
