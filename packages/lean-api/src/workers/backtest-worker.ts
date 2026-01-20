@@ -15,6 +15,14 @@ import {
   getLocalCacheDir,
   getHostCacheDir,
 } from '../services/s3-cache.js';
+import {
+  createUsageRecord,
+  markUsageRunning,
+  completeUsageRecord,
+  incrementDataPoints,
+  linkBacktestToUsage,
+  getDockerStats,
+} from '../services/usage-tracking.js';
 import type { BacktestJobData, LeanFile, MarketDataDaily } from '../types/index.js';
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
@@ -53,35 +61,37 @@ export interface ChartUpdate {
 export type OnChartUpdate = (update: ChartUpdate) => void;
 
 // ============================================================================
-// PORT POOL FOR CONCURRENT BACKTESTS
+// PORT POOL FOR CONCURRENT BACKTESTS (Distributed via Redis)
 // ============================================================================
 
-// Port range for ZeroMQ streaming (each concurrent backtest needs a unique port)
-const STREAMING_PORT_BASE = parseInt(process.env.LEAN_STREAMING_PORT_BASE || '5680', 10);
-const STREAMING_PORT_MAX = parseInt(process.env.LEAN_STREAMING_PORT_MAX || '5780', 10);
+import {
+  allocatePort as allocateDistributedPort,
+  releasePort as releaseDistributedPort,
+  refreshPort as refreshDistributedPort,
+  cleanupStalePorts,
+} from '../services/distributed-ports.js';
 
-// Track allocated ports
-const allocatedPorts = new Set<number>();
+// Track allocated ports locally for fast cleanup on shutdown
+const localAllocatedPorts = new Set<number>();
 
 /**
  * Allocate a free port for ZeroMQ streaming
+ * Uses Redis for distributed coordination across worker nodes
  */
-function allocateStreamingPort(): number | null {
-  for (let port = STREAMING_PORT_BASE; port <= STREAMING_PORT_MAX; port++) {
-    if (!allocatedPorts.has(port)) {
-      allocatedPorts.add(port);
-      return port;
-    }
+async function allocateStreamingPort(): Promise<number | null> {
+  const port = await allocateDistributedPort();
+  if (port) {
+    localAllocatedPorts.add(port);
   }
-  console.warn('[LEAN Streaming] No free ports available in range', STREAMING_PORT_BASE, '-', STREAMING_PORT_MAX);
-  return null;
+  return port;
 }
 
 /**
  * Release a streaming port back to the pool
  */
-function releaseStreamingPort(port: number): void {
-  allocatedPorts.delete(port);
+async function releaseStreamingPort(port: number): Promise<void> {
+  localAllocatedPorts.delete(port);
+  await releaseDistributedPort(port);
 }
 
 // ============================================================================
@@ -921,6 +931,7 @@ async function runLeanBacktest(
   ordersJson?: Record<string, unknown>;
   insightsJson?: unknown[];
   resultJson?: unknown;
+  peakMemoryMb?: number;  // Peak memory usage for billing
 }> {
   // Create workspace directories for this backtest
   // Only algorithm files and results are per-backtest - data comes from persistent cache
@@ -975,7 +986,7 @@ async function runLeanBacktest(
 
     // Set up streaming if chart callback is provided
     if (onChartUpdate) {
-      streamingPort = allocateStreamingPort();
+      streamingPort = await allocateStreamingPort();
       if (streamingPort) {
         console.log(`[LEAN Streaming] Allocated port ${streamingPort} for real-time chart updates`);
         zmqSocket = await createStreamingSubscriber(streamingPort, onChartUpdate, abortController.signal);
@@ -1153,7 +1164,7 @@ async function runLeanBacktest(
       }
     }
     if (streamingPort) {
-      releaseStreamingPort(streamingPort);
+      await releaseStreamingPort(streamingPort);
       console.log(`[LEAN Streaming] Released port ${streamingPort}`);
     }
 
@@ -1291,13 +1302,34 @@ function extractDatesFromAlgorithm(code: string): { startDate: Date; endDate: Da
   return { startDate, endDate };
 }
 
+// Worker node identifier for distributed tracking
+const WORKER_NODE = process.env.WORKER_NODE_ID || `worker-${os.hostname()}-${process.pid}`;
+
 /**
- * Process a backtest job
+ * Process a backtest job with usage tracking for billing
  */
 async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
   const { backtestId, projectId, userId, startDate, endDate, cash, parameters } = job.data;
 
-  console.log(`[Backtest Worker] Processing backtest ${backtestId}`);
+  console.log(`[Backtest Worker] Processing backtest ${backtestId} for user ${userId}`);
+
+  // Track timing and resources
+  const jobStartTime = Date.now();
+  let usageTrackingId: string | null = null;
+  let peakMemoryMb = 0;
+  let dataPointsFetched = 0;
+
+  // Parse memory limit from env (e.g., "6g" -> 6144, "1400m" -> 1400)
+  const memLimitStr = process.env.LEAN_MEMORY_LIMIT || '4g';
+  let memoryLimitMb = 4096;
+  const memMatch = memLimitStr.match(/^(\d+)(g|m)$/i);
+  if (memMatch) {
+    memoryLimitMb = memMatch[2].toLowerCase() === 'g'
+      ? parseInt(memMatch[1]) * 1024
+      : parseInt(memMatch[1]);
+  }
+
+  const cpuCores = parseFloat(process.env.LEAN_CPU_LIMIT || '2');
 
   const updateProgress = async (progress: number) => {
     await execute(
@@ -1307,12 +1339,35 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
   };
 
   try {
+    // Create usage tracking record for billing
+    try {
+      usageTrackingId = await createUsageRecord({
+        userId,
+        backtestId,
+        cpuCoresUsed: cpuCores,
+        memoryLimitMb,
+        workerNode: WORKER_NODE,
+      });
+      console.log(`[Backtest Worker] Created usage tracking record: ${usageTrackingId}`);
+
+      // Link backtest to usage record
+      await linkBacktestToUsage(backtestId, usageTrackingId);
+    } catch (err) {
+      // Usage tracking is non-critical - log and continue
+      console.warn('[Backtest Worker] Failed to create usage tracking record:', err);
+    }
+
     // Update status to running
     await execute(
       `UPDATE qc_backtests SET status = 'running', started_at = NOW(), progress = 0
        WHERE qc_backtest_id = $1`,
       [backtestId]
     );
+
+    // Mark usage as running
+    if (usageTrackingId) {
+      await markUsageRunning(usageTrackingId).catch(() => {});
+    }
 
     // Get algorithm files
     const files = await query<LeanFile>(
@@ -1340,11 +1395,14 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
     // Ensure market data is cached for the algorithm's date range
     if (symbols.length > 0) {
       console.log('[Backtest Worker] Caching market data...');
-      await ensureMultipleSymbolsCached(
+      const dataResult = await ensureMultipleSymbolsCached(
         symbols,
         dataStartDate,
         dataEndDate
       );
+      // Track data points fetched (estimate based on symbols * days)
+      const days = Math.ceil((dataEndDate.getTime() - dataStartDate.getTime()) / (1000 * 60 * 60 * 24));
+      dataPointsFetched = symbols.length * days;
     }
 
     await updateProgress(10);
@@ -1352,6 +1410,8 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
     // Run LEAN backtest with algorithm's dates
     // Enable real-time chart streaming via Redis pub/sub
     console.log('[Backtest Worker] Running LEAN engine...');
+    const leanStartTime = Date.now();
+
     const onChartUpdate: OnChartUpdate = (update) => {
       // Publish chart update to Redis for SSE to pick up
       publishChartUpdate(backtestId, {
@@ -1374,6 +1434,9 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       updateProgress,
       onChartUpdate  // Enable real-time chart streaming
     );
+
+    const leanDurationSeconds = (Date.now() - leanStartTime) / 1000;
+    peakMemoryMb = result.peakMemoryMb || memoryLimitMb * 0.5; // Estimate if not available
 
     await updateProgress(95);
 
@@ -1444,7 +1507,24 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       ]
     );
 
-    console.log(`[Backtest Worker] Completed backtest ${backtestId}`);
+    // Complete usage tracking with success
+    const totalDurationSeconds = (Date.now() - jobStartTime) / 1000;
+    const computeSeconds = leanDurationSeconds * cpuCores; // CPU-seconds for billing
+
+    if (usageTrackingId) {
+      await completeUsageRecord({
+        usageId: usageTrackingId,
+        computeSeconds,
+        memoryPeakMb: Math.round(peakMemoryMb),
+        memoryMbSeconds: Math.round(peakMemoryMb * leanDurationSeconds),
+        dataPointsFetched,
+        status: 'completed',
+      }).catch((err) => {
+        console.warn('[Backtest Worker] Failed to complete usage tracking:', err);
+      });
+    }
+
+    console.log(`[Backtest Worker] Completed backtest ${backtestId} in ${totalDurationSeconds.toFixed(1)}s (${computeSeconds.toFixed(1)} CPU-seconds)`);
   } catch (error) {
     console.error(`[Backtest Worker] Error in backtest ${backtestId}:`, error);
 
@@ -1458,14 +1538,34 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       [backtestId, (error as Error).message]
     );
 
+    // Complete usage tracking with error
+    const totalDurationSeconds = (Date.now() - jobStartTime) / 1000;
+    if (usageTrackingId) {
+      await completeUsageRecord({
+        usageId: usageTrackingId,
+        computeSeconds: totalDurationSeconds * cpuCores,
+        memoryPeakMb: Math.round(peakMemoryMb),
+        dataPointsFetched,
+        status: 'error',
+        errorMessage: (error as Error).message,
+      }).catch(() => {});
+    }
+
     throw error;
   }
 }
 
 /**
  * Start the backtest worker
+ * Initializes distributed port allocation and starts processing jobs
  */
-export function startBacktestWorker(): Worker {
+export async function startBacktestWorker(): Promise<Worker> {
+  // Clean up any stale ports from previous worker sessions
+  const cleaned = await cleanupStalePorts(WORKER_NODE);
+  if (cleaned > 0) {
+    console.log(`[Backtest Worker] Cleaned up ${cleaned} stale port(s) from previous session`);
+  }
+
   const connection = {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
@@ -1489,7 +1589,20 @@ export function startBacktestWorker(): Worker {
     console.error('[Backtest Worker] Worker error:', err);
   });
 
-  console.log('[Backtest Worker] Started');
+  // Graceful shutdown - release all ports
+  const shutdown = async () => {
+    console.log('[Backtest Worker] Shutting down, releasing ports...');
+    for (const port of localAllocatedPorts) {
+      await releaseStreamingPort(port).catch(() => {});
+    }
+    await worker.close();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+
+  console.log(`[Backtest Worker] Started (node: ${WORKER_NODE})`);
 
   return worker;
 }

@@ -11,6 +11,7 @@ import { Router, type IRouter } from 'express';
 import { query, queryOne, execute, transaction, clientQueryOne } from '../services/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
+import { canUserRunJob, getUserMonthlyUsage } from '../services/usage-tracking.js';
 import type {
   QCBacktestsResponse,
   QCBacktestResponse,
@@ -257,6 +258,17 @@ router.post('/create', async (req, res) => {
         success: false,
         backtest: null,
         errors: ['Project not found or access denied'],
+      });
+    }
+
+    // Check user quota and concurrency limits
+    const quotaCheck = await canUserRunJob(userId, 'backtest');
+    if (!quotaCheck.allowed) {
+      console.log(`[Backtests] Quota exceeded for user ${userId}: ${quotaCheck.reason}`);
+      return res.status(429).json({
+        success: false,
+        backtest: null,
+        errors: [quotaCheck.reason],
       });
     }
 

@@ -113,7 +113,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 });
 
 // Start server
-let backtestWorker: ReturnType<typeof startBacktestWorker> | null = null;
+let backtestWorker: Awaited<ReturnType<typeof startBacktestWorker>> | null = null;
 let optimizationWorker: ReturnType<typeof startOptimizationWorker> | null = null;
 
 async function start() {
@@ -133,7 +133,7 @@ async function start() {
 
     // Start background workers
     if (process.env.ENABLE_WORKERS !== 'false') {
-      backtestWorker = startBacktestWorker();
+      backtestWorker = await startBacktestWorker();
       console.log('✓ Backtest worker started');
       optimizationWorker = startOptimizationWorker();
       console.log('✓ Optimization worker started');
