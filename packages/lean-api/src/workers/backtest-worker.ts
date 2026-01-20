@@ -804,18 +804,20 @@ function extractSymbols(code: string): string[] {
  */
 function extractDatesFromAlgorithm(code: string): { startDate: Date; endDate: Date } | null {
   // Match patterns like:
-  // - self.set_start_date(2023, 1, 1)
-  // - self.SetStartDate(2023, 1, 1)
+  // - self.set_start_date(2023, 1, 1) (snake_case)
+  // - self.SetStartDate(2023, 1, 1) (CamelCase)
   // - set_start_date(2023, 1, 1)
   // - self.set_start_date(datetime(2023, 1, 1))
-  const startPattern = /(?:self\.)?set_start_date\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i;
-  const endPattern = /(?:self\.)?set_end_date\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i;
+  // Note: Using alternation for snake_case and CamelCase since /i flag doesn't help with underscores
+  const startPattern = /(?:self\.)?(set_start_date|SetStartDate)\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/;
+  const endPattern = /(?:self\.)?(set_end_date|SetEndDate)\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/;
 
   const startMatch = code.match(startPattern);
   const endMatch = code.match(endPattern);
 
-  console.log(`[extractDatesFromAlgorithm] startMatch: ${startMatch ? startMatch.slice(1, 4).join('-') : 'null'}`);
-  console.log(`[extractDatesFromAlgorithm] endMatch: ${endMatch ? endMatch.slice(1, 4).join('-') : 'null'}`);
+  // Groups: [0]=full match, [1]=method name, [2]=year, [3]=month, [4]=day
+  console.log(`[extractDatesFromAlgorithm] startMatch: ${startMatch ? startMatch.slice(2, 5).join('-') : 'null'}`);
+  console.log(`[extractDatesFromAlgorithm] endMatch: ${endMatch ? endMatch.slice(2, 5).join('-') : 'null'}`);
 
   if (!startMatch || !endMatch) {
     console.log('[extractDatesFromAlgorithm] Could not extract dates, using fallback');
@@ -823,15 +825,16 @@ function extractDatesFromAlgorithm(code: string): { startDate: Date; endDate: Da
   }
 
   // Python months are 1-indexed, JS Date months are 0-indexed
+  // Groups: [2]=year, [3]=month, [4]=day (group [1] is the method name)
   const startDate = new Date(
-    parseInt(startMatch[1]),
-    parseInt(startMatch[2]) - 1,
-    parseInt(startMatch[3])
+    parseInt(startMatch[2]),
+    parseInt(startMatch[3]) - 1,
+    parseInt(startMatch[4])
   );
   const endDate = new Date(
-    parseInt(endMatch[1]),
-    parseInt(endMatch[2]) - 1,
-    parseInt(endMatch[3])
+    parseInt(endMatch[2]),
+    parseInt(endMatch[3]) - 1,
+    parseInt(endMatch[4])
   );
 
   console.log(`[extractDatesFromAlgorithm] Extracted: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
