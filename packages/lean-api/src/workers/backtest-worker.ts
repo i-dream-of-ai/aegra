@@ -381,24 +381,35 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
 
   // Extract numeric values from LEAN portfolioStatistics/tradeStatistics
   // Note: LEAN returns these as STRINGS (e.g., "0.0775"), not numbers
+  // Handle NaN, Infinity, and -Infinity which PostgreSQL cannot store
   const getNumber = (val: unknown): number => {
     if (val === undefined || val === null) return 0;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const parsed = parseFloat(val);
-      return isNaN(parsed) ? 0 : parsed;
+    let num: number;
+    if (typeof val === 'number') {
+      num = val;
+    } else if (typeof val === 'string') {
+      num = parseFloat(val);
+    } else {
+      return 0;
     }
-    return 0;
+    // PostgreSQL cannot store NaN or Infinity
+    if (isNaN(num) || !isFinite(num)) return 0;
+    return num;
   };
 
   const getNumberOrNull = (val: unknown): number | null => {
     if (val === undefined || val === null) return null;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const parsed = parseFloat(val);
-      return isNaN(parsed) ? null : parsed;
+    let num: number;
+    if (typeof val === 'number') {
+      num = val;
+    } else if (typeof val === 'string') {
+      num = parseFloat(val);
+    } else {
+      return null;
     }
-    return null;
+    // PostgreSQL cannot store NaN or Infinity
+    if (isNaN(num) || !isFinite(num)) return null;
+    return num;
   };
 
   // LEAN returns decimals (0.05 = 5%), but QC Cloud API returns percentages (5.0 = 5%)
