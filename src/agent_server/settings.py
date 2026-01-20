@@ -59,6 +59,9 @@ class DatabaseSettings(EnvBase):
     POSTGRES_DB: str
     DB_ECHO_LOG: bool = False
 
+    # SSL mode for cloud databases (Supabase, etc.)
+    POSTGRES_SSLMODE: str = "require"
+
     @computed_field
     @property
     def database_url(self) -> str:
@@ -66,6 +69,7 @@ class DatabaseSettings(EnvBase):
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            f"?sslmode={self.POSTGRES_SSLMODE}"
         )
 
     @computed_field
@@ -75,6 +79,7 @@ class DatabaseSettings(EnvBase):
         return (
             f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            f"?sslmode={self.POSTGRES_SSLMODE}"
         )
 
 

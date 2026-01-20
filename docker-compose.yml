@@ -9,7 +9,7 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=postgres
+      # POSTGRES_HOST comes from .env (Supabase for production)
       - AUTH_TYPE=custom
       - DEBUG=true
       - PORT=${PORT:-8000}
