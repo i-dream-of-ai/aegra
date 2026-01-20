@@ -1052,6 +1052,48 @@ async function runLeanBacktest(
     const totalDays = Math.max(1, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
     let lastProgressUpdate = Date.now();
 
+    // Poll main.json for intermediate results (LEAN writes every ~30 seconds)
+    // This gives us chart updates without needing StreamingMessageHandler
+    const mainJsonPath = path.join(resultsDir, 'main.json');
+    let lastMainJsonSize = 0;
+    let resultPollerInterval: NodeJS.Timeout | null = null;
+
+    if (onChartUpdate) {
+      resultPollerInterval = setInterval(async () => {
+        try {
+          const stat = await fs.stat(mainJsonPath).catch(() => null);
+          if (stat && stat.size > lastMainJsonSize) {
+            lastMainJsonSize = stat.size;
+            const content = await fs.readFile(mainJsonPath, 'utf-8');
+            const data = JSON.parse(content);
+
+            // Extract chart updates from the intermediate results
+            const charts = data.charts || data.Charts || {};
+            for (const [chartName, chart] of Object.entries(charts)) {
+              const chartData = chart as { Series?: Record<string, unknown>; series?: Record<string, unknown> };
+              const series = chartData.Series || chartData.series || {};
+              for (const [seriesName, seriesData] of Object.entries(series)) {
+                const sd = seriesData as { Values?: Array<{ x: number; y: number }>; values?: Array<{ x: number; y: number }> };
+                const values = sd.Values || sd.values || [];
+                if (values.length > 0) {
+                  // Send the latest points (last 10 to avoid duplicates)
+                  const recentPoints = values.slice(-10);
+                  onChartUpdate({
+                    chartName,
+                    seriesName,
+                    points: recentPoints,
+                  });
+                }
+              }
+            }
+            console.log(`[LEAN Results Poller] Read ${stat.size} bytes from main.json`);
+          }
+        } catch (err) {
+          // File may not exist yet or be in the middle of being written
+        }
+      }, 5000); // Poll every 5 seconds
+    }
+
     const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const proc = spawn('docker', dockerArgs);
 
@@ -1106,6 +1148,12 @@ async function runLeanBacktest(
         resolve({ code: 1, stdout, stderr: err.message });
       });
     });
+
+    // Stop the results poller
+    if (resultPollerInterval) {
+      clearInterval(resultPollerInterval);
+      console.log('[LEAN Results Poller] Stopped');
+    }
 
     await onProgress(90);
 
@@ -1454,11 +1502,9 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       });
     };
 
-    // TEMPORARY: Disable real-time streaming due to LEAN Docker assembly bug
-    // The System.Private.ServiceModel.dll in recent LEAN images is corrupted,
-    // causing StreamingMessageHandler to crash. Disable streaming until fixed.
-    // TODO: Re-enable once LEAN fixes their Docker builds
-    // See: https://github.com/QuantConnect/Lean/issues/XXXX
+    // Use file-based streaming instead of StreamingMessageHandler
+    // LEAN writes main.json every ~30 seconds, we poll it for chart updates
+    // This avoids the broken System.Private.ServiceModel.dll assembly issue
     const result = await runLeanBacktest(
       projectId,
       files,
@@ -1468,7 +1514,7 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       cash,
       parameters,
       updateProgress,
-      undefined  // Streaming disabled - onChartUpdate would enable it
+      onChartUpdate  // Enable chart streaming via file polling
     );
 
     const leanDurationSeconds = (Date.now() - leanStartTime) / 1000;
