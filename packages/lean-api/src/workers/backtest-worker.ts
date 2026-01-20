@@ -379,110 +379,49 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
   const tradeStats = (totalPerf.tradeStatistics || totalPerf.TradeStatistics || {}) as Record<string, unknown>;
 
 
-  // Parse percentage strings - QC Cloud stores percentages as-is (3.08 = 3.08%)
-  // LEAN returns "3.08%" - we just strip the % sign and keep the number
-  const parsePercent = (val: string | number | undefined): number => {
+  // Extract numeric values from LEAN portfolioStatistics/tradeStatistics
+  const getNumber = (val: unknown): number => {
     if (val === undefined || val === null) return 0;
     if (typeof val === 'number') return val;
-    const str = String(val);
-    // Strip % sign and return the number as-is
-    return parseFloat(str.replace('%', '')) || 0;
+    return 0;
   };
 
-  // Parse percentage to decimal format (for winRate which QC stores as 0.49 = 49%)
-  // LEAN returns "49%" - we need to convert to decimal 0.49
-  const parsePercentToDecimal = (val: string | number | undefined): number => {
-    if (val === undefined || val === null) return 0;
-    if (typeof val === 'number') {
-      // If already a decimal (< 1), keep it; if percentage (>= 1), divide
-      return val >= 1 ? val / 100 : val;
-    }
-    const str = String(val);
-    if (str.includes('%')) {
-      // "49%" -> 0.49
-      return (parseFloat(str.replace('%', '')) || 0) / 100;
-    }
-    // Plain number - if >= 1, it's a percentage that needs dividing
-    const num = parseFloat(str) || 0;
-    return num >= 1 ? num / 100 : num;
-  };
-
-  const parseNumber = (val: string | number | undefined): number => {
-    if (val === undefined || val === null) return 0;
-    return parseFloat(String(val)) || 0;
-  };
-
-  const parseNumberOrNull = (val: string | number | undefined): number | null => {
+  const getNumberOrNull = (val: unknown): number | null => {
     if (val === undefined || val === null) return null;
-    const num = parseFloat(String(val).replace(/[$%,]/g, ''));
-    return isNaN(num) ? null : num;
+    if (typeof val === 'number') return val;
+    return null;
   };
 
-  // Helper to safely extract value from unknown record
-  const getValue = (obj: Record<string, unknown>, key: string): string | number | undefined => {
-    const val = obj[key];
-    if (val === undefined || val === null) return undefined;
-    if (typeof val === 'string' || typeof val === 'number') return val;
-    return undefined;
+  // LEAN returns decimals (0.05 = 5%), but QC Cloud API returns percentages (5.0 = 5%)
+  // UI expects QC Cloud format, so multiply LEAN decimals by 100
+  const toPercent = (val: unknown): number => getNumber(val) * 100;
+  const toPercentOrNull = (val: unknown): number | null => {
+    const n = getNumberOrNull(val);
+    return n !== null ? n * 100 : null;
   };
 
-  // Stats uses "Title Case", portfolioStats uses camelCase
-  // Note: netProfit, cagr, drawdown stored as percentages (3.08 = 3.08%)
-  // winRate stored as decimal (0.49 = 49%)
   return {
-    netProfit: parsePercent(
-      stats['Net Profit'] ||
-      getValue(portfolioStats, 'totalNetProfit')
-    ),
-    sharpeRatio: parseNumber(
-      stats['Sharpe Ratio'] ||
-      getValue(portfolioStats, 'sharpeRatio')
-    ),
-    cagr: parsePercent(
-      stats['Compounding Annual Return'] ||
-      getValue(portfolioStats, 'compoundingAnnualReturn')
-    ),
-    drawdown: parsePercent(
-      stats['Drawdown'] ||
-      getValue(portfolioStats, 'drawdown')
-    ),
-    totalTrades: parseInt(
-      stats['Total Orders'] ||
-      String(getValue(tradeStats, 'totalNumberOfTrades') || 0),
-      10
-    ),
-    winRate: parsePercentToDecimal(
-      stats['Win Rate'] ||
-      getValue(tradeStats, 'winRate')
-    ),
-    // Win/Loss counts
-    totalWins: parseInt(
-      stats['Total Wins'] ||
-      String(getValue(tradeStats, 'numberOfWinningTrades') || 0),
-      10
-    ),
-    totalLosses: parseInt(
-      stats['Total Losses'] ||
-      String(getValue(tradeStats, 'numberOfLosingTrades') || 0),
-      10
-    ),
-    profitLossRatio: parseNumber(
-      stats['Profit-Loss Ratio'] ||
-      getValue(tradeStats, 'profitLossRatio')
-    ),
-    // Additional comprehensive statistics
-    alpha: parseNumberOrNull(stats['Alpha'] || getValue(portfolioStats, 'alpha')),
-    beta: parseNumberOrNull(stats['Beta'] || getValue(portfolioStats, 'beta')),
-    sortinoRatio: parseNumberOrNull(stats['Sortino Ratio'] || getValue(portfolioStats, 'sortinoRatio')),
-    treynorRatio: parseNumberOrNull(stats['Treynor Ratio'] || getValue(portfolioStats, 'treynorRatio')),
-    informationRatio: parseNumberOrNull(stats['Information Ratio'] || getValue(portfolioStats, 'informationRatio')),
-    trackingError: parseNumberOrNull(stats['Tracking Error'] || getValue(portfolioStats, 'trackingError')),
-    annualStdDev: parseNumberOrNull(stats['Annual Standard Deviation'] || getValue(portfolioStats, 'annualStandardDeviation')),
-    annualVariance: parseNumberOrNull(stats['Annual Variance'] || getValue(portfolioStats, 'annualVariance')),
-    totalFees: parseNumberOrNull(stats['Total Fees'] || getValue(tradeStats, 'totalFees')),
-    averageWin: parseNumberOrNull(stats['Average Win'] || getValue(tradeStats, 'averageWin')),
-    averageLoss: parseNumberOrNull(stats['Average Loss'] || getValue(tradeStats, 'averageLoss')),
-    endEquity: parseNumberOrNull(stats['End Equity'] || getValue(portfolioStats, 'endEquity')),
+    netProfit: toPercent(portfolioStats['totalNetProfit']),
+    sharpeRatio: getNumber(portfolioStats['sharpeRatio']),
+    cagr: toPercent(portfolioStats['compoundingAnnualReturn']),
+    drawdown: toPercent(portfolioStats['drawdown']),
+    totalTrades: getNumber(tradeStats['totalNumberOfTrades']),
+    winRate: getNumber(tradeStats['winRate']), // Already 0-1 decimal, UI handles
+    totalWins: getNumber(tradeStats['numberOfWinningTrades']),
+    totalLosses: getNumber(tradeStats['numberOfLosingTrades']),
+    profitLossRatio: getNumber(tradeStats['profitLossRatio']),
+    alpha: toPercentOrNull(portfolioStats['alpha']),
+    beta: getNumberOrNull(portfolioStats['beta']), // Beta is not a percentage
+    sortinoRatio: getNumberOrNull(portfolioStats['sortinoRatio']),
+    treynorRatio: getNumberOrNull(portfolioStats['treynorRatio']),
+    informationRatio: getNumberOrNull(portfolioStats['informationRatio']),
+    trackingError: toPercentOrNull(portfolioStats['trackingError']),
+    annualStdDev: toPercentOrNull(portfolioStats['annualStandardDeviation']),
+    annualVariance: getNumberOrNull(portfolioStats['annualVariance']),
+    totalFees: getNumberOrNull(tradeStats['totalFees']),
+    averageWin: getNumberOrNull(tradeStats['averageWin']),
+    averageLoss: getNumberOrNull(tradeStats['averageLoss']),
+    endEquity: getNumberOrNull(portfolioStats['endEquity']),
   };
 }
 
