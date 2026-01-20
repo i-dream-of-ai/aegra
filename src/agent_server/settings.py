@@ -65,11 +65,11 @@ class DatabaseSettings(EnvBase):
     @computed_field
     @property
     def database_url(self) -> str:
-        """Async URL for SQLAlchemy (asyncpg)."""
+        """Async URL for SQLAlchemy (asyncpg). Uses 'ssl' param (not 'sslmode')."""
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-            f"?sslmode={self.POSTGRES_SSLMODE}"
+            f"?ssl={self.POSTGRES_SSLMODE}"
         )
 
     @computed_field
