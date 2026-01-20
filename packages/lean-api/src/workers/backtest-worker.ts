@@ -125,6 +125,14 @@ interface LeanBacktestResultPacket {
 /**
  * Create a ZeroMQ Pull socket to receive LEAN's streaming packets
  * Returns an async iterator that yields chart updates
+ *
+ * Architecture:
+ * - LEAN's StreamingMessageHandler creates a PUSH socket that BINDS to the port
+ * - Our code creates a PULL socket that CONNECTS to that port
+ * - LEAN pushes messages, we pull/receive them
+ *
+ * With --network host, LEAN binds to localhost:{port} on the host
+ * Our Node.js also runs on host (or in Docker with host network), so we connect to localhost
  */
 async function createStreamingSubscriber(
   port: number,
@@ -133,11 +141,12 @@ async function createStreamingSubscriber(
 ): Promise<zmq.Pull> {
   const socket = new zmq.Pull();
 
-  // Bind to all interfaces so Docker container can push to us
-  const bindAddress = `tcp://*:${port}`;
-  console.log(`[LEAN Streaming] Binding ZeroMQ Pull socket to ${bindAddress}`);
+  // Connect to LEAN's PUSH socket (LEAN binds, we connect)
+  // ZeroMQ connect can happen before bind - it will reconnect automatically
+  const connectAddress = `tcp://localhost:${port}`;
+  console.log(`[LEAN Streaming] Connecting ZeroMQ Pull socket to ${connectAddress}`);
 
-  await socket.bind(bindAddress);
+  await socket.connect(connectAddress);
 
   // Start receiving messages in the background
   (async () => {
