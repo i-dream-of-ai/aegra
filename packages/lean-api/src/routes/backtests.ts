@@ -931,13 +931,27 @@ router.get('/stream/:backtestId', async (req, res) => {
       const equityCurve = extractEquityCurve(rollingWindow);
 
       // Build statistics from available data
+      // Database values may be strings or numbers, so convert safely
+      const toNum = (v: unknown): number | null => {
+        if (v === null || v === undefined) return null;
+        const n = typeof v === 'number' ? v : parseFloat(String(v));
+        return isNaN(n) || !isFinite(n) ? null : n;
+      };
+
+      const netProfit = toNum(current.netProfit);
+      const cagr = toNum(current.cagr);
+      const sharpeRatio = toNum(current.sharpeRatio);
+      const drawdown = toNum(current.drawdown);
+      const winRate = toNum(current.winRate);
+      const totalTrades = toNum(current.totalTrades);
+
       const statistics = current.status === 'completed' ? {
-        totalReturn: current.netProfit ? `${current.netProfit.toFixed(2)}%` : undefined,
-        cagr: current.cagr ? `${(current.cagr * 100).toFixed(2)}%` : undefined,
-        sharpeRatio: current.sharpeRatio?.toFixed(3),
-        maxDrawdown: current.drawdown ? `${(current.drawdown * 100).toFixed(2)}%` : undefined,
-        winRate: current.winRate ? `${(current.winRate * 100).toFixed(0)}%` : undefined,
-        totalTrades: current.totalTrades?.toString(),
+        totalReturn: netProfit !== null ? `${netProfit.toFixed(2)}%` : undefined,
+        cagr: cagr !== null ? `${cagr.toFixed(2)}%` : undefined,
+        sharpeRatio: sharpeRatio !== null ? sharpeRatio.toFixed(3) : undefined,
+        maxDrawdown: drawdown !== null ? `${drawdown.toFixed(2)}%` : undefined,
+        winRate: winRate !== null ? `${(winRate * 100).toFixed(0)}%` : undefined,
+        totalTrades: totalTrades !== null ? totalTrades.toString() : undefined,
       } : undefined;
 
       sendEvent({
