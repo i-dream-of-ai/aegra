@@ -380,15 +380,24 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
 
 
   // Extract numeric values from LEAN portfolioStatistics/tradeStatistics
+  // Note: LEAN returns these as STRINGS (e.g., "0.0775"), not numbers
   const getNumber = (val: unknown): number => {
     if (val === undefined || val === null) return 0;
     if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val);
+      return isNaN(parsed) ? 0 : parsed;
+    }
     return 0;
   };
 
   const getNumberOrNull = (val: unknown): number | null => {
     if (val === undefined || val === null) return null;
     if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val);
+      return isNaN(parsed) ? null : parsed;
+    }
     return null;
   };
 
