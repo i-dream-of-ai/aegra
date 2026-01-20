@@ -16,7 +16,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import archiver from 'archiver';
-import { createWriteStream } from 'fs';
+import { createWriteStream, createReadStream } from 'fs';
+import * as unzipper from 'unzipper';
 
 // Workspace directory for LEAN backtests - must be accessible from both this container AND the Docker host
 // When using sibling containers (Docker socket mounting), paths must exist on the host
@@ -50,26 +51,122 @@ interface LeanResult {
 }
 
 /**
- * Check if LEAN data exists in cache
- * Cache is backed by s3fs mount, so local check is sufficient
+ * Get cached date range from existing LEAN zip file
+ * Returns null if no cache exists
  */
-async function isDataCached(symbol: string): Promise<boolean> {
+async function getCachedDateRange(symbol: string): Promise<{ firstDate: Date; lastDate: Date } | null> {
   const symbolLower = symbol.toLowerCase();
   const cacheDir = getLocalCacheDir();
   const zipPath = path.join(cacheDir, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
+
+  try {
+    await fs.access(zipPath);
+  } catch {
+    return null;
+  }
+
+  try {
+    // Read the zip file and extract date range from CSV content
+    const directory = await unzipper.Open.file(zipPath);
+    const csvFile = directory.files.find(f => f.path.endsWith('.csv'));
+
+    if (!csvFile) {
+      console.log(`[LEAN Data Cache] No CSV found in ${zipPath}`);
+      return null;
+    }
+
+    const content = await csvFile.buffer();
+    const lines = content.toString('utf-8').trim().split('\n');
+
+    if (lines.length === 0) {
+      return null;
+    }
+
+    // LEAN format: YYYYMMDD 00:00,open,high,low,close,volume
+    const parseDate = (line: string): Date | null => {
+      const dateStr = line.split(' ')[0]; // Get YYYYMMDD part
+      if (dateStr.length !== 8) return null;
+      const year = parseInt(dateStr.substring(0, 4));
+      const month = parseInt(dateStr.substring(4, 6)) - 1;
+      const day = parseInt(dateStr.substring(6, 8));
+      return new Date(year, month, day);
+    };
+
+    const firstDate = parseDate(lines[0]);
+    const lastDate = parseDate(lines[lines.length - 1]);
+
+    if (!firstDate || !lastDate) {
+      console.log(`[LEAN Data Cache] Could not parse dates from ${zipPath}`);
+      return null;
+    }
+
+    console.log(`[LEAN Data Cache] ${symbol} cached range: ${firstDate.toISOString().split('T')[0]} to ${lastDate.toISOString().split('T')[0]}`);
+    return { firstDate, lastDate };
+  } catch (error) {
+    console.error(`[LEAN Data Cache] Error reading cached range for ${symbol}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Check if LEAN data exists in cache and covers the required date range
+ * Returns coverage info: 'full', 'partial', or 'none'
+ */
+async function checkCacheStatus(
+  symbol: string,
+  requiredStart: Date,
+  requiredEnd: Date
+): Promise<{
+  status: 'full' | 'partial' | 'none';
+  cachedRange: { firstDate: Date; lastDate: Date } | null;
+  missingBefore: boolean;
+  missingAfter: boolean;
+}> {
+  const symbolLower = symbol.toLowerCase();
+  const cacheDir = getLocalCacheDir();
   const mapPath = path.join(cacheDir, 'equity', 'usa', 'map_files', `${symbolLower}.csv`);
   const factorPath = path.join(cacheDir, 'equity', 'usa', 'factor_files', `${symbolLower}.csv`);
 
+  // Check if auxiliary files exist (map and factor files)
+  let hasAuxFiles = true;
   try {
     await Promise.all([
-      fs.access(zipPath),
       fs.access(mapPath),
       fs.access(factorPath),
     ]);
-    return true;
   } catch {
-    return false;
+    hasAuxFiles = false;
   }
+
+  const cachedRange = await getCachedDateRange(symbol);
+
+  if (!cachedRange || !hasAuxFiles) {
+    return {
+      status: 'none',
+      cachedRange: null,
+      missingBefore: true,
+      missingAfter: true,
+    };
+  }
+
+  const missingBefore = cachedRange.firstDate > requiredStart;
+  const missingAfter = cachedRange.lastDate < requiredEnd;
+
+  if (!missingBefore && !missingAfter) {
+    return {
+      status: 'full',
+      cachedRange,
+      missingBefore: false,
+      missingAfter: false,
+    };
+  }
+
+  return {
+    status: 'partial',
+    cachedRange,
+    missingBefore,
+    missingAfter,
+  };
 }
 
 /**
@@ -192,31 +289,139 @@ async function generateFactorFileToCache(
 }
 
 /**
- * Ensure symbol data exists in persistent cache - generates if missing
- * Cache is backed by s3fs mount to DO Spaces, so writes persist automatically
+ * Read existing cached bars from LEAN zip file
+ */
+async function readCachedBars(symbol: string): Promise<MarketDataDaily[]> {
+  const symbolLower = symbol.toLowerCase();
+  const cacheDir = getLocalCacheDir();
+  const zipPath = path.join(cacheDir, 'equity', 'usa', 'daily', `${symbolLower}.zip`);
+
+  try {
+    await fs.access(zipPath);
+  } catch {
+    return [];
+  }
+
+  try {
+    const directory = await unzipper.Open.file(zipPath);
+    const csvFile = directory.files.find(f => f.path.endsWith('.csv'));
+
+    if (!csvFile) {
+      return [];
+    }
+
+    const content = await csvFile.buffer();
+    const lines = content.toString('utf-8').trim().split('\n');
+
+    // Parse LEAN format: YYYYMMDD 00:00,open*10000,high*10000,low*10000,close*10000,volume
+    return lines.map(line => {
+      const [dateTime, open, high, low, close, volume] = line.split(',');
+      const dateStr = dateTime.split(' ')[0];
+      const year = parseInt(dateStr.substring(0, 4));
+      const month = parseInt(dateStr.substring(4, 6));
+      const day = parseInt(dateStr.substring(6, 8));
+
+      return {
+        date: new Date(year, month - 1, day),
+        open: parseFloat(open) / 10000,
+        high: parseFloat(high) / 10000,
+        low: parseFloat(low) / 10000,
+        close: parseFloat(close) / 10000,
+        volume: parseInt(volume, 10),
+        // These fields are not stored in LEAN format but satisfy the interface
+        adjusted_close: parseFloat(close) / 10000,
+        dividend: 0,
+        split_coefficient: 1,
+      } as unknown as MarketDataDaily;
+    });
+  } catch (error) {
+    console.error(`[LEAN Data Cache] Error reading cached bars for ${symbol}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Merge and deduplicate bars, sorted by date
+ */
+function mergeBars(existing: MarketDataDaily[], newBars: MarketDataDaily[]): MarketDataDaily[] {
+  // Use a Map to dedupe by date string
+  const barMap = new Map<string, MarketDataDaily>();
+
+  // Add existing bars first
+  for (const bar of existing) {
+    const dateStr = new Date(bar.date).toISOString().split('T')[0];
+    barMap.set(dateStr, bar);
+  }
+
+  // Add/overwrite with new bars (new data takes priority)
+  for (const bar of newBars) {
+    const dateStr = new Date(bar.date).toISOString().split('T')[0];
+    barMap.set(dateStr, bar);
+  }
+
+  // Convert back to array and sort by date
+  const merged = Array.from(barMap.values());
+  merged.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  return merged;
+}
+
+/**
+ * Ensure symbol data exists in persistent cache with required date range
+ * Production-grade: checks existing cache and only extends if needed
  */
 async function ensureSymbolInCache(
   symbol: string,
-  bars: MarketDataDaily[],
-  startDate: Date
+  newBars: MarketDataDaily[],
+  requiredStart: Date,
+  requiredEnd: Date
 ): Promise<void> {
-  if (await isDataCached(symbol)) {
-    console.log(`[LEAN Data Cache] ${symbol} already cached, skipping generation`);
+  const cacheStatus = await checkCacheStatus(symbol, requiredStart, requiredEnd);
+
+  if (cacheStatus.status === 'full') {
+    console.log(`[LEAN Data Cache] ${symbol} cache covers required range, skipping`);
     return;
   }
 
+  if (cacheStatus.status === 'partial') {
+    console.log(`[LEAN Data Cache] ${symbol} cache partial coverage:`);
+    console.log(`  - Required: ${requiredStart.toISOString().split('T')[0]} to ${requiredEnd.toISOString().split('T')[0]}`);
+    console.log(`  - Cached: ${cacheStatus.cachedRange!.firstDate.toISOString().split('T')[0]} to ${cacheStatus.cachedRange!.lastDate.toISOString().split('T')[0]}`);
+    console.log(`  - Missing before: ${cacheStatus.missingBefore}, after: ${cacheStatus.missingAfter}`);
+
+    // Read existing cached data and merge with new bars
+    const existingBars = await readCachedBars(symbol);
+    const mergedBars = mergeBars(existingBars, newBars);
+
+    console.log(`[LEAN Data Cache] Merging ${existingBars.length} existing + ${newBars.length} new = ${mergedBars.length} total bars`);
+
+    if (mergedBars.length > 0) {
+      await exportMarketDataToCache(symbol, mergedBars);
+      const lastBar = mergedBars[mergedBars.length - 1];
+      const firstBar = mergedBars[0];
+      const referencePrice = Number(lastBar.close);
+      await generateMapFileToCache(symbol, new Date(firstBar.date));
+      await generateFactorFileToCache(symbol, new Date(firstBar.date), referencePrice);
+    }
+
+    console.log(`[LEAN Data Cache] ${symbol} cache extended`);
+    return;
+  }
+
+  // status === 'none' - generate from scratch
   console.log(`[LEAN Data Cache] Generating LEAN data for ${symbol}...`);
 
-  if (bars.length > 0) {
-    await exportMarketDataToCache(symbol, bars);
-    const lastBar = bars[bars.length - 1];
+  if (newBars.length > 0) {
+    await exportMarketDataToCache(symbol, newBars);
+    const lastBar = newBars[newBars.length - 1];
+    const firstBar = newBars[0];
     const referencePrice = Number(lastBar.close);
-    await generateMapFileToCache(symbol, startDate);
-    await generateFactorFileToCache(symbol, startDate, referencePrice);
+    await generateMapFileToCache(symbol, new Date(firstBar.date));
+    await generateFactorFileToCache(symbol, new Date(firstBar.date), referencePrice);
   } else {
     // Generate auxiliary files even without price data
-    await generateMapFileToCache(symbol, startDate);
-    await generateFactorFileToCache(symbol, startDate, 0);
+    await generateMapFileToCache(symbol, requiredStart);
+    await generateFactorFileToCache(symbol, requiredStart, 0);
   }
 
   console.log(`[LEAN Data Cache] ${symbol} written to cache (persisted via s3fs)`);
@@ -548,10 +753,11 @@ async function runLeanBacktest(
 
     await onProgress(30);
 
-    // Ensure LEAN-format data exists in persistent cache (generates if missing)
+    // Ensure LEAN-format data exists in persistent cache
+    // Production-grade: checks date range coverage, only regenerates/extends if needed
     for (const symbol of symbols) {
       const bars = await getDailyBars(symbol, startDate, endDate);
-      await ensureSymbolInCache(symbol, bars, startDate);
+      await ensureSymbolInCache(symbol, bars, startDate, endDate);
     }
 
     await onProgress(40);

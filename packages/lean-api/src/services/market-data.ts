@@ -632,6 +632,7 @@ async function fetchFromProvider(
 
 /**
  * Ensure market data is cached for a symbol and date range
+ * Production-grade: checks cached range and only fetches missing data
  * Supports both platform and user-owned data
  * Tries providers in order: preferred provider, then fallback providers
  */
@@ -659,10 +660,12 @@ export async function ensureMarketDataCached(
 
     if (!symbolInfo) {
       // First time seeing this symbol - fetch full history
-      console.log(`[MarketData] Fetching full history for ${symbol} via ${provider} (${ownership.ownerType})`);
+      console.log(`[MarketData] First time caching ${symbol} via ${provider} (${ownership.ownerType})`);
+      console.log(`[MarketData]   Required range: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
 
       const data = await fetchFromProvider(provider, symbol, credentials, startDate, endDate, true);
       if (data && data.bars.length > 0) {
+        console.log(`[MarketData]   Fetched ${data.bars.length} bars`);
         await cacheNormalizedData(data, provider, ownership);
         return { cached: true, source: ownership.ownerType, provider };
       }
@@ -671,12 +674,53 @@ export async function ensureMarketDataCached(
       continue;
     }
 
-    // Check if we need to update with recent data
-    if (symbolInfo.lastDate && new Date(symbolInfo.lastDate) < endDate) {
-      console.log(`[MarketData] Fetching recent data for ${symbol} via ${provider} (${ownership.ownerType})`);
+    // Check cached range vs required range
+    const cachedFirst = symbolInfo.firstDate ? new Date(symbolInfo.firstDate) : null;
+    const cachedLast = symbolInfo.lastDate ? new Date(symbolInfo.lastDate) : null;
 
-      const data = await fetchFromProvider(provider, symbol, credentials, new Date(symbolInfo.lastDate), endDate, false);
+    const needsEarlierData = cachedFirst && cachedFirst > startDate;
+    const needsLaterData = cachedLast && cachedLast < endDate;
+
+    if (!needsEarlierData && !needsLaterData) {
+      console.log(`[MarketData] ${symbol} cache fully covers required range`);
+      console.log(`[MarketData]   Required: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+      console.log(`[MarketData]   Cached: ${cachedFirst?.toISOString().split('T')[0]} to ${cachedLast?.toISOString().split('T')[0]}`);
+      return { cached: true, source: ownership.ownerType, provider };
+    }
+
+    console.log(`[MarketData] ${symbol} cache partial - needs extension`);
+    console.log(`[MarketData]   Required: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+    console.log(`[MarketData]   Cached: ${cachedFirst?.toISOString().split('T')[0]} to ${cachedLast?.toISOString().split('T')[0]}`);
+    console.log(`[MarketData]   Needs earlier: ${needsEarlierData}, Needs later: ${needsLaterData}`);
+
+    // For Alpha Vantage, it's more efficient to fetch full history since the API
+    // returns all data regardless of start date. For other providers we could
+    // optimize by fetching only the missing range.
+    if (needsEarlierData && provider === 'alpha_vantage') {
+      // Alpha Vantage TIME_SERIES_DAILY_ADJUSTED with outputsize=full returns all history
+      // So just refetch full and merge (API call is same cost regardless)
+      console.log(`[MarketData] Refetching full history for ${symbol} (need earlier data)`);
+      const data = await fetchFromProvider(provider, symbol, credentials, startDate, endDate, true);
       if (data && data.bars.length > 0) {
+        console.log(`[MarketData]   Fetched ${data.bars.length} bars, merging with cache`);
+        await cacheNormalizedData(data, provider, ownership);
+      }
+    } else if (needsEarlierData && provider === 'alpaca') {
+      // Alpaca supports date ranges, so fetch only the missing earlier data
+      console.log(`[MarketData] Fetching earlier data for ${symbol}: ${startDate.toISOString().split('T')[0]} to ${cachedFirst!.toISOString().split('T')[0]}`);
+      const data = await fetchFromProvider(provider, symbol, credentials, startDate, cachedFirst!, false);
+      if (data && data.bars.length > 0) {
+        console.log(`[MarketData]   Fetched ${data.bars.length} earlier bars`);
+        await cacheNormalizedData(data, provider, ownership);
+      }
+    }
+
+    // Fetch later data if needed
+    if (needsLaterData) {
+      console.log(`[MarketData] Fetching later data for ${symbol}: ${cachedLast!.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+      const data = await fetchFromProvider(provider, symbol, credentials, cachedLast!, endDate, false);
+      if (data && data.bars.length > 0) {
+        console.log(`[MarketData]   Fetched ${data.bars.length} later bars`);
         await cacheNormalizedData(data, provider, ownership);
       }
     }
