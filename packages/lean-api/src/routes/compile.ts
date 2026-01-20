@@ -1,19 +1,106 @@
 /**
  * Compile Routes - QC API Compatible
  * POST /api/v2/compile/create
+ *
+ * Uses Python AST parser to validate algorithms properly.
+ * This mirrors QC Cloud's behavior - real Python parsing, not string matching.
  */
 
 import { Router, type IRouter } from 'express';
 import { query, queryOne } from '../services/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logError, formatErrorForResponse, getErrorStatusCode } from '../utils/errors.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import type {
   QCCompileResponse,
   CompileCreateRequest,
   ProjectFile,
 } from '../types/index.js';
 
+const execAsync = promisify(exec);
+
 const router: IRouter = Router();
+
+/**
+ * Validation result from Python script
+ */
+interface ValidationResult {
+  success: boolean;
+  errors: string[];
+  files_checked: string[];
+}
+
+/**
+ * Validate project files using Python AST parser
+ * Creates a temp directory with project files and runs validation script
+ */
+async function validateProjectWithPython(files: ProjectFile[]): Promise<ValidationResult> {
+  // Create temp directory for project files
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lean-compile-'));
+
+  try {
+    // Write all project files to temp directory
+    for (const file of files) {
+      const filePath = path.join(tempDir, file.name);
+      await fs.writeFile(filePath, file.content, 'utf-8');
+    }
+
+    // Path to validation script
+    // In dev (tsx): __dirname is src/routes, script is at src/scripts/
+    // In prod (node dist/): __dirname is dist/routes, script is at src/scripts/ (not copied by tsc)
+    // So we use process.cwd() which is /app in Docker, script is at /app/src/scripts/
+    const scriptPath = path.join(process.cwd(), 'src', 'scripts', 'validate_algorithm.py');
+
+    // Run Python validation
+    const { stdout, stderr } = await execAsync(`python3 "${scriptPath}" "${tempDir}"`, {
+      timeout: 30000, // 30 second timeout
+    });
+
+    // Parse JSON output
+    try {
+      return JSON.parse(stdout.trim()) as ValidationResult;
+    } catch {
+      // If JSON parsing fails, treat as error
+      return {
+        success: false,
+        errors: [`Validation script error: ${stderr || stdout || 'Unknown error'}`],
+        files_checked: [],
+      };
+    }
+  } catch (error: unknown) {
+    // Handle exec errors (timeout, script not found, etc.)
+    const errMsg = error instanceof Error ? error.message : String(error);
+
+    // Try to parse stdout if available (script might have returned JSON error)
+    if (error && typeof error === 'object' && 'stdout' in error) {
+      const stdout = (error as { stdout?: string }).stdout;
+      if (stdout) {
+        try {
+          return JSON.parse(stdout.trim()) as ValidationResult;
+        } catch {
+          // Fall through to generic error
+        }
+      }
+    }
+
+    return {
+      success: false,
+      errors: [`Validation failed: ${errMsg}`],
+      files_checked: [],
+    };
+  } finally {
+    // Clean up temp directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
 
 /**
  * Look up project by QC project ID and verify ownership
@@ -37,9 +124,6 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
   );
   return directProject?.id || null;
 }
-
-// No custom validation - LEAN handles all compilation/validation
-// We just check that main.py exists and let LEAN do the rest
 
 /**
  * POST /compile/create - Compile/validate a project
@@ -129,9 +213,23 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    // No custom validation - LEAN handles compilation
-    // Just return success and let the backtest worker run LEAN
+    // Run Python AST validation on all project files
+    const validation = await validateProjectWithPython(files);
     const compileId = uuidv4();
+
+    if (!validation.success) {
+      return res.json({
+        success: false,
+        compileId,
+        projectId,
+        state: 'BuildError',
+        parameters: [],
+        signature: '',
+        signatureOrder: [],
+        logs: validation.errors,
+        errors: validation.errors,
+      });
+    }
 
     res.json({
       success: true,
@@ -141,7 +239,7 @@ router.post('/create', async (req, res) => {
       parameters: [],
       signature: compileId,
       signatureOrder: files.map(f => f.name),
-      logs: ['Syntax validation passed', 'Ready to run backtest'],
+      logs: [`Validated ${validation.files_checked.length} file(s)`, 'Ready to run backtest'],
       errors: [],
     });
   } catch (error) {
@@ -256,8 +354,23 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    // No custom validation - LEAN handles compilation
-    // Just return success - the actual compile happened in /compile/create
+    // Re-validate with Python AST parser
+    const validation = await validateProjectWithPython(files);
+
+    if (!validation.success) {
+      return res.json({
+        success: false,
+        compileId,
+        projectId,
+        state: 'BuildError',
+        parameters: [],
+        signature: '',
+        signatureOrder: [],
+        logs: validation.errors,
+        errors: validation.errors,
+      });
+    }
+
     res.json({
       success: true,
       compileId,
@@ -266,7 +379,7 @@ router.post('/read', async (req, res) => {
       parameters: [],
       signature: compileId,
       signatureOrder: files.map(f => f.name),
-      logs: ['Syntax validation passed', 'Ready to run backtest'],
+      logs: [`Validated ${validation.files_checked.length} file(s)`, 'Ready to run backtest'],
       errors: [],
     });
   } catch (error) {
