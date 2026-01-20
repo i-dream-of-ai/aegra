@@ -40,51 +40,18 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
 
 /**
  * Basic Python syntax validation
+ *
+ * IMPORTANT: This is intentionally minimal to avoid false positives.
+ * Python syntax is complex (multi-line statements, f-strings, etc.)
+ * and naive checks cause valid QC code to fail.
+ *
+ * We only check for things we can reliably detect:
+ * - Required LEAN imports
+ * - QCAlgorithm inheritance
+ * - Initialize method presence
  */
 function validatePythonSyntax(code: string): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  const lines = code.split('\n');
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lineNum = i + 1;
-    const trimmed = line.trim();
-
-    if (trimmed === '' || trimmed.startsWith('#')) continue;
-
-    // Check for tabs mixed with spaces
-    if (line.includes('\t') && line.includes('    ')) {
-      errors.push(`Line ${lineNum}: Mixed tabs and spaces in indentation`);
-    }
-
-    // Check for unclosed strings
-    const stringMatches = trimmed.match(/["']/g);
-    if (stringMatches && stringMatches.length % 2 !== 0) {
-      if (!trimmed.includes('"""') && !trimmed.includes("'''")) {
-        errors.push(`Line ${lineNum}: Unclosed string literal`);
-      }
-    }
-
-    // Check for colon at end of control structures
-    const controlKeywords = ['if', 'elif', 'else', 'for', 'while', 'try', 'except', 'finally', 'with', 'def', 'class'];
-    for (const keyword of controlKeywords) {
-      if (trimmed.startsWith(keyword + ' ') || trimmed === keyword) {
-        if (!trimmed.endsWith(':') && !trimmed.includes(':')) {
-          errors.push(`Line ${lineNum}: Missing colon after '${keyword}' statement`);
-        }
-      }
-    }
-
-    // Check for invalid variable names
-    const assignmentMatch = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=/);
-    if (assignmentMatch) {
-      const varName = assignmentMatch[1];
-      const pythonKeywords = ['and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield', 'True', 'False', 'None'];
-      if (pythonKeywords.includes(varName)) {
-        errors.push(`Line ${lineNum}: Cannot use Python keyword '${varName}' as variable name`);
-      }
-    }
-  }
 
   // Check for required LEAN imports
   if (!code.includes('from AlgorithmImports import') && !code.includes('import AlgorithmImports')) {
@@ -96,7 +63,7 @@ function validatePythonSyntax(code: string): { valid: boolean; errors: string[] 
     errors.push('Algorithm must inherit from QCAlgorithm');
   }
 
-  // Check for initialize method
+  // Check for initialize method (case-insensitive check)
   if (!code.includes('def initialize(self)') && !code.includes('def Initialize(self)')) {
     errors.push('Algorithm must have an initialize(self) method');
   }
