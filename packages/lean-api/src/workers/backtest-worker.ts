@@ -1007,6 +1007,8 @@ async function runLeanBacktest(
     await onProgress(50);
 
     // Run LEAN Docker container
+    // Use latest LEAN image from QuantConnect main branch
+    // See: https://hub.docker.com/r/quantconnect/lean
     const dockerImage = process.env.LEAN_DOCKER_IMAGE || 'quantconnect/lean:latest';
 
     // Mount persistent data cache as /Data (read-only)
@@ -1015,6 +1017,9 @@ async function runLeanBacktest(
     const dockerArgs = [
       'run',
       '--rm',
+      // Force x86_64 platform - LEAN doesn't have ARM images
+      // Required for Apple Silicon and other ARM hosts
+      '--platform', 'linux/amd64',
       // Use host network so LEAN can push to our ZeroMQ socket
       // This is required for StreamingMessageHandler to reach the host
       ...(streamingPort ? ['--network', 'host'] : []),
