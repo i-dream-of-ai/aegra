@@ -9,6 +9,7 @@
  */
 
 import Redis from 'ioredis';
+import type { Redis as RedisClient } from 'ioredis';
 
 // Redis connection factory
 const getRedisConnection = () => ({
@@ -17,12 +18,12 @@ const getRedisConnection = () => ({
 });
 
 // Publisher client (singleton)
-let publisher: Redis | null = null;
+let publisher: RedisClient | null = null;
 
-function getPublisher(): Redis {
+function getPublisher(): RedisClient {
   if (!publisher) {
     publisher = new Redis(getRedisConnection());
-    publisher.on('error', (err) => {
+    publisher.on('error', (err: Error) => {
       console.error('[ChartStreaming] Publisher error:', err);
     });
   }
@@ -73,7 +74,7 @@ export function subscribeToChartUpdates(
   const subscriber = new Redis(getRedisConnection());
   const channel = getChartChannel(backtestId);
 
-  subscriber.subscribe(channel, (err) => {
+  subscriber.subscribe(channel, (err: Error | null) => {
     if (err) {
       console.error(`[ChartStreaming] Failed to subscribe to ${channel}:`, err);
     } else {
@@ -81,7 +82,7 @@ export function subscribeToChartUpdates(
     }
   });
 
-  subscriber.on('message', (msgChannel, message) => {
+  subscriber.on('message', (msgChannel: string, message: string) => {
     if (msgChannel === channel) {
       try {
         const update = JSON.parse(message) as ChartStreamPayload;

@@ -89,26 +89,36 @@ function releaseStreamingPort(port: number): void {
 // ============================================================================
 
 /**
+ * Series data structure within a LEAN chart
+ */
+interface LeanChartSeries {
+  Name: string;
+  Unit?: string;
+  Index?: number;
+  Values: Array<{ x: number; y: number }>;
+  SeriesType?: number;
+  Color?: string;
+}
+
+/**
+ * Chart data structure from LEAN
+ */
+interface LeanChart {
+  Name: string;
+  ChartType?: number;
+  Series: Record<string, LeanChartSeries>;
+}
+
+/**
  * LEAN's BacktestResultPacket structure (simplified - we only extract charts)
  * Full spec: QuantConnect.Packets.BacktestResultPacket
  */
 interface LeanBacktestResultPacket {
   Type?: string;  // "BacktestResult"
   Progress?: number;
-  Charts?: Record<string, {
-    Name: string;
-    ChartType?: number;
-    Series: Record<string, {
-      Name: string;
-      Unit?: string;
-      Index?: number;
-      Values: Array<{ x: number; y: number }>;
-      SeriesType?: number;
-      Color?: string;
-    }>;
-  }>;
+  Charts?: Record<string, LeanChart>;
   Results?: {
-    Charts?: Record<string, unknown>;
+    Charts?: Record<string, LeanChart>;
   };
 }
 
@@ -141,11 +151,11 @@ async function createStreamingSubscriber(
           const packet = JSON.parse(msg.toString()) as LeanBacktestResultPacket;
 
           // Extract chart updates from the packet
-          const charts = packet.Charts || packet.Results?.Charts;
+          const charts: Record<string, LeanChart> | undefined = packet.Charts || packet.Results?.Charts;
           if (charts && typeof charts === 'object') {
             for (const [chartName, chart] of Object.entries(charts)) {
               if (chart && typeof chart === 'object' && 'Series' in chart) {
-                const typedChart = chart as LeanBacktestResultPacket['Charts'][string];
+                const typedChart = chart as LeanChart;
                 for (const [seriesName, series] of Object.entries(typedChart.Series || {})) {
                   if (series.Values && series.Values.length > 0) {
                     onChartUpdate({
