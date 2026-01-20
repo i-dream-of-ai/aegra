@@ -39,18 +39,21 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
 }
 
 /**
- * Basic Python syntax validation
+ * Validate the MAIN algorithm file
  *
  * IMPORTANT: This is intentionally minimal to avoid false positives.
  * Python syntax is complex (multi-line statements, f-strings, etc.)
  * and naive checks cause valid QC code to fail.
  *
- * We only check for things we can reliably detect:
+ * We only check for things we can reliably detect in the MAIN file:
  * - Required LEAN imports
  * - QCAlgorithm inheritance
  * - Initialize method presence
+ *
+ * Helper files (universe.py, indicators.py, etc.) are NOT validated
+ * with these checks - they don't need QCAlgorithm inheritance.
  */
-function validatePythonSyntax(code: string): { valid: boolean; errors: string[] } {
+function validateMainAlgorithmFile(code: string): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
   // Check for required LEAN imports
@@ -165,15 +168,13 @@ router.post('/create', async (req, res) => {
     const allLogs: string[] = [];
     let hasErrors = false;
 
-    for (const file of files) {
-      if (file.name.endsWith('.py')) {
-        const validation = validatePythonSyntax(file.content);
-        if (!validation.valid) {
-          hasErrors = true;
-          allLogs.push(`Errors in ${file.name}:`);
-          allLogs.push(...validation.errors.map(e => `  ${e}`));
-        }
-      }
+    // Only validate the MAIN algorithm file for QCAlgorithm requirements
+    // Helper files (universe.py, indicators.py, etc.) don't need these checks
+    const validation = validateMainAlgorithmFile(mainFile.content);
+    if (!validation.valid) {
+      hasErrors = true;
+      allLogs.push(`Errors in ${mainFile.name}:`);
+      allLogs.push(...validation.errors.map(e => `  ${e}`));
     }
 
     const compileId = uuidv4();
@@ -315,19 +316,16 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    // Re-validate the files
+    // Re-validate only the MAIN algorithm file
+    // Helper files don't need QCAlgorithm requirements
     const allLogs: string[] = [];
     let hasErrors = false;
 
-    for (const file of files) {
-      if (file.name.endsWith('.py')) {
-        const validation = validatePythonSyntax(file.content);
-        if (!validation.valid) {
-          hasErrors = true;
-          allLogs.push(`Errors in ${file.name}:`);
-          allLogs.push(...validation.errors.map(e => `  ${e}`));
-        }
-      }
+    const validation = validateMainAlgorithmFile(mainFile.content);
+    if (!validation.valid) {
+      hasErrors = true;
+      allLogs.push(`Errors in ${mainFile.name}:`);
+      allLogs.push(...validation.errors.map(e => `  ${e}`));
     }
 
     if (hasErrors) {
