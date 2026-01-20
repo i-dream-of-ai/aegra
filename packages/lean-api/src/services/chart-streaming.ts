@@ -8,7 +8,7 @@
  * - SSE route subscribes to the channel and forwards to client
  */
 
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 
 // Redis connection factory
 const getRedisConnection = () => ({
@@ -17,11 +17,11 @@ const getRedisConnection = () => ({
 });
 
 // Publisher client (singleton)
-let publisher: IORedis | null = null;
+let publisher: Redis | null = null;
 
-function getPublisher(): IORedis {
+function getPublisher(): Redis {
   if (!publisher) {
-    publisher = new IORedis(getRedisConnection());
+    publisher = new Redis(getRedisConnection());
     publisher.on('error', (err: Error) => {
       console.error('[ChartStreaming] Publisher error:', err);
     });
@@ -70,7 +70,7 @@ export function subscribeToChartUpdates(
   backtestId: string,
   onUpdate: (update: ChartStreamPayload) => void
 ): () => void {
-  const subscriber = new IORedis(getRedisConnection());
+  const subscriber = new Redis(getRedisConnection());
   const channel = getChartChannel(backtestId);
 
   subscriber.subscribe(channel, (err: Error | null) => {
