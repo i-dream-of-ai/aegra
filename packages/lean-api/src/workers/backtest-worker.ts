@@ -1,6 +1,11 @@
 /**
  * Backtest Worker
  * Processes backtest jobs using the LEAN engine via Docker
+ *
+ * Streaming Architecture:
+ * - LEAN uses StreamingMessageHandler to push BacktestResultPacket via ZeroMQ
+ * - We listen on a ZeroMQ Pull socket to receive real-time chart updates
+ * - Chart updates are forwarded to SSE for live frontend visualization
  */
 
 import { Worker, Job } from 'bullmq';
@@ -18,6 +23,164 @@ import * as os from 'os';
 import archiver from 'archiver';
 import { createWriteStream, createReadStream } from 'fs';
 import * as unzipper from 'unzipper';
+import * as zmq from 'zeromq';
+import { publishChartUpdate } from '../services/chart-streaming.js';
+
+// ============================================================================
+// STREAMING TYPES
+// ============================================================================
+
+/**
+ * Chart point for real-time streaming
+ */
+export interface ChartPoint {
+  x: number;  // Unix timestamp (seconds)
+  y: number;  // Value (equity, benchmark, etc.)
+}
+
+/**
+ * Chart update streamed from LEAN
+ */
+export interface ChartUpdate {
+  chartName: string;
+  seriesName: string;
+  points: ChartPoint[];
+}
+
+/**
+ * Callback for receiving real-time chart updates
+ */
+export type OnChartUpdate = (update: ChartUpdate) => void;
+
+// ============================================================================
+// PORT POOL FOR CONCURRENT BACKTESTS
+// ============================================================================
+
+// Port range for ZeroMQ streaming (each concurrent backtest needs a unique port)
+const STREAMING_PORT_BASE = parseInt(process.env.LEAN_STREAMING_PORT_BASE || '5680', 10);
+const STREAMING_PORT_MAX = parseInt(process.env.LEAN_STREAMING_PORT_MAX || '5780', 10);
+
+// Track allocated ports
+const allocatedPorts = new Set<number>();
+
+/**
+ * Allocate a free port for ZeroMQ streaming
+ */
+function allocateStreamingPort(): number | null {
+  for (let port = STREAMING_PORT_BASE; port <= STREAMING_PORT_MAX; port++) {
+    if (!allocatedPorts.has(port)) {
+      allocatedPorts.add(port);
+      return port;
+    }
+  }
+  console.warn('[LEAN Streaming] No free ports available in range', STREAMING_PORT_BASE, '-', STREAMING_PORT_MAX);
+  return null;
+}
+
+/**
+ * Release a streaming port back to the pool
+ */
+function releaseStreamingPort(port: number): void {
+  allocatedPorts.delete(port);
+}
+
+// ============================================================================
+// ZEROMQ STREAMING SUBSCRIBER
+// ============================================================================
+
+/**
+ * LEAN's BacktestResultPacket structure (simplified - we only extract charts)
+ * Full spec: QuantConnect.Packets.BacktestResultPacket
+ */
+interface LeanBacktestResultPacket {
+  Type?: string;  // "BacktestResult"
+  Progress?: number;
+  Charts?: Record<string, {
+    Name: string;
+    ChartType?: number;
+    Series: Record<string, {
+      Name: string;
+      Unit?: string;
+      Index?: number;
+      Values: Array<{ x: number; y: number }>;
+      SeriesType?: number;
+      Color?: string;
+    }>;
+  }>;
+  Results?: {
+    Charts?: Record<string, unknown>;
+  };
+}
+
+/**
+ * Create a ZeroMQ Pull socket to receive LEAN's streaming packets
+ * Returns an async iterator that yields chart updates
+ */
+async function createStreamingSubscriber(
+  port: number,
+  onChartUpdate: OnChartUpdate,
+  abortSignal: AbortSignal
+): Promise<zmq.Pull> {
+  const socket = new zmq.Pull();
+
+  // Bind to all interfaces so Docker container can push to us
+  const bindAddress = `tcp://*:${port}`;
+  console.log(`[LEAN Streaming] Binding ZeroMQ Pull socket to ${bindAddress}`);
+
+  await socket.bind(bindAddress);
+
+  // Start receiving messages in the background
+  (async () => {
+    try {
+      for await (const [msg] of socket) {
+        if (abortSignal.aborted) {
+          break;
+        }
+
+        try {
+          const packet = JSON.parse(msg.toString()) as LeanBacktestResultPacket;
+
+          // Extract chart updates from the packet
+          const charts = packet.Charts || packet.Results?.Charts;
+          if (charts && typeof charts === 'object') {
+            for (const [chartName, chart] of Object.entries(charts)) {
+              if (chart && typeof chart === 'object' && 'Series' in chart) {
+                const typedChart = chart as LeanBacktestResultPacket['Charts'][string];
+                for (const [seriesName, series] of Object.entries(typedChart.Series || {})) {
+                  if (series.Values && series.Values.length > 0) {
+                    onChartUpdate({
+                      chartName,
+                      seriesName,
+                      points: series.Values,
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          // Also extract progress if available
+          if (packet.Progress !== undefined) {
+            console.log(`[LEAN Streaming] Progress: ${(packet.Progress * 100).toFixed(1)}%`);
+          }
+        } catch (parseError) {
+          // Ignore parse errors - LEAN may send non-JSON messages
+          console.debug('[LEAN Streaming] Non-JSON message received');
+        }
+      }
+    } catch (err) {
+      if (!abortSignal.aborted) {
+        console.error('[LEAN Streaming] Socket error:', err);
+      }
+    }
+  })();
+
+  return socket;
+}
+
+// ============================================================================
+// WORKSPACE CONFIGURATION
+// ============================================================================
 
 // Workspace directory for LEAN backtests - must be accessible from both this container AND the Docker host
 // When using sibling containers (Docker socket mounting), paths must exist on the host
@@ -27,7 +190,9 @@ const LEAN_WORKSPACES_DIR = process.env.LEAN_WORKSPACES_DIR || '/app/workspaces'
 // The container sees /app/workspaces but Docker daemon sees the host-mounted path
 const LEAN_HOST_WORKSPACES_DIR = process.env.LEAN_HOST_WORKSPACES_DIR || LEAN_WORKSPACES_DIR;
 
-// LEAN result types
+// ============================================================================
+// LEAN RESULT TYPES
+// ============================================================================
 interface LeanResult {
   Statistics?: Record<string, string>;
   RuntimeStatistics?: Record<string, string>;
@@ -469,12 +634,16 @@ async function ensureLeanStaticData(): Promise<void> {
 /**
  * Create LEAN config.json for the backtest
  * Parameters are passed to LEAN and can be accessed via self.get_parameter() in the algorithm
+ *
+ * When streamingPort is provided, LEAN will use StreamingMessageHandler to push
+ * real-time chart updates via ZeroMQ on that port.
  */
 function createLeanConfig(
   startDate: Date,
   endDate: Date,
   cash: number,
-  parameters: Record<string, unknown> = {}
+  parameters: Record<string, unknown> = {},
+  streamingPort?: number
 ): object {
   // Note: These paths are INSIDE the Docker container, not host paths
   // The Docker volumes map:
@@ -488,14 +657,13 @@ function createLeanConfig(
     leanParameters[key] = String(value);
   }
 
-  return {
+  const config: Record<string, unknown> = {
     'environment': 'backtesting',
     'algorithm-type-name': 'main',
     'algorithm-language': 'Python',
     'algorithm-location': '/Algorithm/main.py',  // Container path
     'data-folder': '/Data',                       // Container path
     'results-destination-folder': '/Results',     // Container path
-    'messaging-handler': 'QuantConnect.Messaging.Messaging',
     'job-queue-handler': 'QuantConnect.Queues.JobQueue',
     'api-handler': 'QuantConnect.Api.Api',
     // Use LocalDiskMapFileProvider and LocalDiskFactorFileProvider
@@ -513,6 +681,19 @@ function createLeanConfig(
     'end-date': endDate.toISOString().split('T')[0],
     'cash-amount': cash,
   };
+
+  // Configure messaging handler based on whether streaming is enabled
+  if (streamingPort) {
+    // Use StreamingMessageHandler for real-time chart updates via ZeroMQ
+    // LEAN will push BacktestResultPacket messages to tcp://*:{port}
+    config['messaging-handler'] = 'QuantConnect.Messaging.StreamingMessageHandler';
+    config['desktop-http-port'] = streamingPort;
+  } else {
+    // Default handler - no streaming
+    config['messaging-handler'] = 'QuantConnect.Messaging.Messaging';
+  }
+
+  return config;
 }
 
 /**
@@ -699,6 +880,9 @@ function extractChartData(results: LeanResult): Record<string, unknown> {
 
 /**
  * Run LEAN backtest using Docker
+ *
+ * @param onChartUpdate - Optional callback for real-time chart updates via ZeroMQ streaming
+ *                        When provided, LEAN will use StreamingMessageHandler to push chart data
  */
 async function runLeanBacktest(
   projectId: number,
@@ -708,7 +892,8 @@ async function runLeanBacktest(
   endDate: Date,
   cash: number,
   parameters: Record<string, unknown>,
-  onProgress: (progress: number) => Promise<void>
+  onProgress: (progress: number) => Promise<void>,
+  onChartUpdate?: OnChartUpdate
 ): Promise<{
   success: boolean;
   error?: string;
@@ -727,6 +912,11 @@ async function runLeanBacktest(
 
   // Host paths for Docker volume mounts (when using sibling container pattern)
   const hostTempBase = path.join(LEAN_HOST_WORKSPACES_DIR, `lean-backtest-${workspaceId}`);
+
+  // Streaming setup
+  let streamingPort: number | null = null;
+  let zmqSocket: zmq.Pull | null = null;
+  const abortController = new AbortController();
   const hostAlgorithmDir = path.join(hostTempBase, 'algorithm');
   const hostResultsDir = path.join(hostTempBase, 'results');
   const hostConfigPath = path.join(hostTempBase, 'config.json');
@@ -764,9 +954,23 @@ async function runLeanBacktest(
 
     await onProgress(40);
 
+    // Set up streaming if chart callback is provided
+    if (onChartUpdate) {
+      streamingPort = allocateStreamingPort();
+      if (streamingPort) {
+        console.log(`[LEAN Streaming] Allocated port ${streamingPort} for real-time chart updates`);
+        zmqSocket = await createStreamingSubscriber(streamingPort, onChartUpdate, abortController.signal);
+      } else {
+        console.warn('[LEAN Streaming] No ports available, running without streaming');
+      }
+    }
+
+    await onProgress(45);
+
     // Create LEAN config (uses container paths, not host paths)
     // Parameters are injected here and accessible via self.get_parameter() in the algorithm
-    const config = createLeanConfig(startDate, endDate, cash, parameters);
+    // Pass streaming port to enable StreamingMessageHandler
+    const config = createLeanConfig(startDate, endDate, cash, parameters, streamingPort || undefined);
     const configPath = path.join(tempBase, 'config.json');
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 
@@ -781,6 +985,9 @@ async function runLeanBacktest(
     const dockerArgs = [
       'run',
       '--rm',
+      // Use host network so LEAN can push to our ZeroMQ socket
+      // This is required for StreamingMessageHandler to reach the host
+      ...(streamingPort ? ['--network', 'host'] : []),
       '-v', `${hostAlgorithmDir}:/Algorithm:ro`,
       '-v', `${hostDataCacheDir}:/Data:ro`,  // Persistent cache from S3/local
       '-v', `${hostResultsDir}:/Results`,
@@ -801,6 +1008,7 @@ async function runLeanBacktest(
     console.log('[LEAN] Data cache (local):', localCacheDir);
     console.log('[LEAN] Data cache (host mount):', hostDataCacheDir);
     console.log('[LEAN] Results dir:', resultsDir);
+    console.log('[LEAN] Streaming port:', streamingPort || 'disabled');
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
 
     const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
@@ -915,6 +1123,21 @@ async function runLeanBacktest(
     };
 
   } finally {
+    // Clean up streaming resources
+    if (zmqSocket) {
+      console.log('[LEAN Streaming] Cleaning up ZeroMQ socket');
+      abortController.abort();
+      try {
+        zmqSocket.close();
+      } catch (e) {
+        console.warn('[LEAN Streaming] Failed to close socket:', e);
+      }
+    }
+    if (streamingPort) {
+      releaseStreamingPort(streamingPort);
+      console.log(`[LEAN Streaming] Released port ${streamingPort}`);
+    }
+
     // Skip cleanup for debugging if LEAN_KEEP_TEMP=true
     if (process.env.LEAN_KEEP_TEMP !== 'true') {
       try {
@@ -1108,7 +1331,19 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
     await updateProgress(10);
 
     // Run LEAN backtest with algorithm's dates
+    // Enable real-time chart streaming via Redis pub/sub
     console.log('[Backtest Worker] Running LEAN engine...');
+    const onChartUpdate: OnChartUpdate = (update) => {
+      // Publish chart update to Redis for SSE to pick up
+      publishChartUpdate(backtestId, {
+        chartName: update.chartName,
+        seriesName: update.seriesName,
+        points: update.points,
+      }).catch((err) => {
+        console.error('[Backtest Worker] Failed to publish chart update:', err);
+      });
+    };
+
     const result = await runLeanBacktest(
       projectId,
       files,
@@ -1117,7 +1352,8 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       dataEndDate,
       cash,
       parameters,
-      updateProgress
+      updateProgress,
+      onChartUpdate  // Enable real-time chart streaming
     );
 
     await updateProgress(95);

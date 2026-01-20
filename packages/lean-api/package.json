@@ -20,6 +20,7 @@
     "pg": "^8.16.3",
     "unzipper": "^0.12.3",
     "uuid": "^13.0.0",
+    "zeromq": "^6.1.2",
     "zod": "^4.1.12"
   },
   "devDependencies": {

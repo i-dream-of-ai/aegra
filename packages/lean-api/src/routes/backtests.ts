@@ -25,6 +25,7 @@ import type {
 } from '../types/index.js';
 import type { Backtest } from '../types/index.js';
 import { getBacktestQueue } from '../workers/queue.js';
+import { subscribeToChartUpdates, type ChartStreamPayload } from '../services/chart-streaming.js';
 
 const router: IRouter = Router();
 
@@ -866,12 +867,27 @@ router.post('/chart/read', async (req, res) => {
  * GET /backtests/stream/:backtestId - Stream live backtest progress via SSE
  *
  * Streams progress updates until the backtest completes or errors.
- * Includes equity curve data from rolling_window when available.
+ * Now includes real-time chart updates from LEAN via Redis pub/sub.
  */
 router.get('/stream/:backtestId', async (req, res) => {
   const { backtestId } = req.params;
   const userId = req.userId;
   const context = { endpoint: 'backtests/stream', userId, backtestId };
+
+  // Cleanup functions to call on exit
+  let unsubscribeChart: (() => void) | null = null;
+  let pollInterval: NodeJS.Timeout | null = null;
+
+  const cleanup = () => {
+    if (unsubscribeChart) {
+      unsubscribeChart();
+      unsubscribeChart = null;
+    }
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  };
 
   try {
     // First verify the backtest exists and belongs to this user
@@ -902,7 +918,18 @@ router.get('/stream/:backtestId', async (req, res) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Extract equity curve from rolling window
+    // Subscribe to real-time chart updates from Redis
+    // These are pushed by the worker as LEAN streams them via ZeroMQ
+    unsubscribeChart = subscribeToChartUpdates(backtestId, (update: ChartStreamPayload) => {
+      sendEvent({
+        type: 'chart_update',
+        chartName: update.chartName,
+        seriesName: update.seriesName,
+        points: update.points,
+      });
+    });
+
+    // Extract equity curve from rolling window (for final results)
     const extractEquityCurve = (rollingWindow: Record<string, unknown> | null): Array<{ x: number; y: number }> => {
       if (!rollingWindow) return [];
 
@@ -973,32 +1000,34 @@ router.get('/stream/:backtestId', async (req, res) => {
     // Initial poll
     const done = await pollBacktest();
     if (done) {
+      cleanup();
       res.end();
       return;
     }
 
-    // Set up polling interval (every 1 second)
-    const pollInterval = setInterval(async () => {
+    // Set up polling interval (every 1 second for progress/status)
+    pollInterval = setInterval(async () => {
       try {
         const done = await pollBacktest();
         if (done) {
-          clearInterval(pollInterval);
+          cleanup();
           res.end();
         }
       } catch (error) {
         console.error('[SSE] Poll error:', error);
         sendEvent({ type: 'error', error: 'Failed to fetch progress' });
-        clearInterval(pollInterval);
+        cleanup();
         res.end();
       }
     }, 1000);
 
     // Clean up on client disconnect
     req.on('close', () => {
-      clearInterval(pollInterval);
+      cleanup();
     });
 
   } catch (error) {
+    cleanup();
     logError('backtests/stream', error, context);
     res.status(500).json({
       success: false,
