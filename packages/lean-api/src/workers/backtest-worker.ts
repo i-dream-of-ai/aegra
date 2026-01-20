@@ -644,7 +644,9 @@ function extractStatistics(results: LeanResult): ExtendedStatistics {
     annualStdDev: toPercentOrNull(portfolioStats['annualStandardDeviation']),
     annualVariance: getNumberOrNull(portfolioStats['annualVariance']),
     totalFees: getNumberOrNull(tradeStats['totalFees']),
-    averageWin: getNumberOrNull(tradeStats['averageWin']),
+    // LEAN uses 'averageProfit' for avg winning trade, 'averageLoss' for avg losing trade
+    // These are dollar amounts, not percentages
+    averageWin: getNumberOrNull(tradeStats['averageProfit']),
     averageLoss: getNumberOrNull(tradeStats['averageLoss']),
     endEquity: getNumberOrNull(portfolioStats['endEquity']),
   };
