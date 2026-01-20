@@ -800,17 +800,25 @@ function extractSymbols(code: string): string[] {
 
 /**
  * Extract dates from algorithm code
- * Looks for set_start_date/set_end_date calls
+ * Looks for set_start_date/set_end_date calls in various formats
  */
 function extractDatesFromAlgorithm(code: string): { startDate: Date; endDate: Date } | null {
-  // Match patterns like: set_start_date(2023, 1, 1) or SetStartDate(2023, 1, 1)
-  const startPattern = /set_start_date\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i;
-  const endPattern = /set_end_date\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i;
+  // Match patterns like:
+  // - self.set_start_date(2023, 1, 1)
+  // - self.SetStartDate(2023, 1, 1)
+  // - set_start_date(2023, 1, 1)
+  // - self.set_start_date(datetime(2023, 1, 1))
+  const startPattern = /(?:self\.)?set_start_date\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i;
+  const endPattern = /(?:self\.)?set_end_date\s*\(\s*(?:datetime\s*\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i;
 
   const startMatch = code.match(startPattern);
   const endMatch = code.match(endPattern);
 
+  console.log(`[extractDatesFromAlgorithm] startMatch: ${startMatch ? startMatch.slice(1, 4).join('-') : 'null'}`);
+  console.log(`[extractDatesFromAlgorithm] endMatch: ${endMatch ? endMatch.slice(1, 4).join('-') : 'null'}`);
+
   if (!startMatch || !endMatch) {
+    console.log('[extractDatesFromAlgorithm] Could not extract dates, using fallback');
     return null;
   }
 
@@ -826,6 +834,7 @@ function extractDatesFromAlgorithm(code: string): { startDate: Date; endDate: Da
     parseInt(endMatch[3])
   );
 
+  console.log(`[extractDatesFromAlgorithm] Extracted: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
   return { startDate, endDate };
 }
 
