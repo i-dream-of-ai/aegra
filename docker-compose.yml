@@ -59,9 +59,12 @@ services:
       - LEAN_DATA_CACHE_DIR=/app/lean-data-cache
       - LEAN_HOST_DATA_CACHE_DIR=/opt/lean-data-cache
       # LEAN container resource limits
-      # Current DO droplet has 2GB RAM - leave ~500MB for system/lean-api
-      - LEAN_MEMORY_LIMIT=${LEAN_MEMORY_LIMIT:-1400m}
-      - LEAN_CPU_LIMIT=${LEAN_CPU_LIMIT:-1}
+      # QC's minimum compute node is 8GB RAM - we need at least that for real backtests
+      # For 8GB droplet: give LEAN 6GB, leave 2GB for system/lean-api/redis
+      # For 16GB droplet: give LEAN 12GB
+      # NOTE: Current 2GB droplet is undersized - upgrade to 8GB+ for production
+      - LEAN_MEMORY_LIMIT=${LEAN_MEMORY_LIMIT:-6g}
+      - LEAN_CPU_LIMIT=${LEAN_CPU_LIMIT:-2}
     volumes:
       # Mount Docker socket for running LEAN containers (sibling container pattern)
       - /var/run/docker.sock:/var/run/docker.sock
