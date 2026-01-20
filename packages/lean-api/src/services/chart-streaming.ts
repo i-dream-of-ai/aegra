@@ -73,12 +73,10 @@ export function subscribeToChartUpdates(
   const subscriber = new Redis(getRedisConnection());
   const channel = getChartChannel(backtestId);
 
-  subscriber.subscribe(channel, (err: Error | null) => {
-    if (err) {
-      console.error(`[ChartStreaming] Failed to subscribe to ${channel}:`, err);
-    } else {
-      console.log(`[ChartStreaming] Subscribed to ${channel}`);
-    }
+  subscriber.subscribe(channel).then(() => {
+    console.log(`[ChartStreaming] Subscribed to ${channel}`);
+  }).catch((err) => {
+    console.error(`[ChartStreaming] Failed to subscribe to ${channel}:`, err);
   });
 
   subscriber.on('message', (msgChannel: string, message: string) => {
