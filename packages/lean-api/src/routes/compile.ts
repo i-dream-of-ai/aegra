@@ -38,44 +38,8 @@ async function getProjectByQcId(qcProjectId: number, userId: string): Promise<nu
   return directProject?.id || null;
 }
 
-/**
- * Validate the MAIN algorithm file
- *
- * IMPORTANT: This is intentionally minimal to avoid false positives.
- * Python syntax is complex (multi-line statements, f-strings, etc.)
- * and naive checks cause valid QC code to fail.
- *
- * We only check for things we can reliably detect in the MAIN file:
- * - Required LEAN imports
- * - QCAlgorithm inheritance
- * - Initialize method presence
- *
- * Helper files (universe.py, indicators.py, etc.) are NOT validated
- * with these checks - they don't need QCAlgorithm inheritance.
- */
-function validateMainAlgorithmFile(code: string): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  // Check for required LEAN imports
-  if (!code.includes('from AlgorithmImports import') && !code.includes('import AlgorithmImports')) {
-    errors.push('Missing required import: from AlgorithmImports import *');
-  }
-
-  // Check for QCAlgorithm class
-  if (!code.includes('QCAlgorithm')) {
-    errors.push('Algorithm must inherit from QCAlgorithm');
-  }
-
-  // Check for initialize method (case-insensitive check)
-  if (!code.includes('def initialize(self)') && !code.includes('def Initialize(self)')) {
-    errors.push('Algorithm must have an initialize(self) method');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
+// No custom validation - LEAN handles all compilation/validation
+// We just check that main.py exists and let LEAN do the rest
 
 /**
  * POST /compile/create - Compile/validate a project
@@ -165,33 +129,9 @@ router.post('/create', async (req, res) => {
       });
     }
 
-    const allLogs: string[] = [];
-    let hasErrors = false;
-
-    // Only validate the MAIN algorithm file for QCAlgorithm requirements
-    // Helper files (universe.py, indicators.py, etc.) don't need these checks
-    const validation = validateMainAlgorithmFile(mainFile.content);
-    if (!validation.valid) {
-      hasErrors = true;
-      allLogs.push(`Errors in ${mainFile.name}:`);
-      allLogs.push(...validation.errors.map(e => `  ${e}`));
-    }
-
+    // No custom validation - LEAN handles compilation
+    // Just return success and let the backtest worker run LEAN
     const compileId = uuidv4();
-
-    if (hasErrors) {
-      return res.json({
-        success: false,
-        compileId,
-        projectId,
-        state: 'BuildError',
-        parameters: [],
-        signature: '',
-        signatureOrder: [],
-        logs: allLogs,
-        errors: allLogs,
-      });
-    }
 
     res.json({
       success: true,
@@ -316,33 +256,8 @@ router.post('/read', async (req, res) => {
       });
     }
 
-    // Re-validate only the MAIN algorithm file
-    // Helper files don't need QCAlgorithm requirements
-    const allLogs: string[] = [];
-    let hasErrors = false;
-
-    const validation = validateMainAlgorithmFile(mainFile.content);
-    if (!validation.valid) {
-      hasErrors = true;
-      allLogs.push(`Errors in ${mainFile.name}:`);
-      allLogs.push(...validation.errors.map(e => `  ${e}`));
-    }
-
-    if (hasErrors) {
-      return res.json({
-        success: false,
-        compileId,
-        projectId,
-        state: 'BuildError',
-        parameters: [],
-        signature: '',
-        signatureOrder: [],
-        logs: allLogs,
-        errors: allLogs,
-      });
-    }
-
-    // Return success - compilation is complete for self-hosted LEAN
+    // No custom validation - LEAN handles compilation
+    // Just return success - the actual compile happened in /compile/create
     res.json({
       success: true,
       compileId,
