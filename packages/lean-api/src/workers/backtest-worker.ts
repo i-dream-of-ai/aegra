@@ -1048,6 +1048,10 @@ async function runLeanBacktest(
     console.log('[LEAN] Streaming port:', streamingPort || 'disabled');
     console.log('[LEAN] Config:', JSON.stringify(config, null, 2));
 
+    // Calculate total date range for progress estimation
+    const totalDays = Math.max(1, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+    let lastProgressUpdate = Date.now();
+
     const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const proc = spawn('docker', dockerArgs);
 
@@ -1056,13 +1060,33 @@ async function runLeanBacktest(
 
       proc.stdout.on('data', (data) => {
         stdout += data.toString();
-        // Log progress updates from LEAN
         const output = data.toString();
+
+        // Parse simulation date from LEAN log lines
+        // Format: "TRACE:: Log: 2020-01-01 00:00:00 ..." or "Log: 2020-01-01 00:00:00 ..."
+        const dateMatch = output.match(/(?:TRACE::\s+)?Log:\s+(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+          const simDate = new Date(dateMatch[1]);
+          if (!isNaN(simDate.getTime())) {
+            const daysPassed = (simDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+            const dateProgress = Math.min(100, Math.max(0, (daysPassed / totalDays) * 100));
+            // Map 0-100% to 50-90% range (50% is after data prep, 90% is before results parsing)
+            const mappedProgress = 50 + (dateProgress * 0.4);
+
+            // Throttle progress updates to every 2 seconds
+            if (Date.now() - lastProgressUpdate > 2000) {
+              lastProgressUpdate = Date.now();
+              onProgress(mappedProgress).catch(() => {});
+              console.log(`[LEAN] Simulation date: ${dateMatch[1]} (${dateProgress.toFixed(1)}%)`);
+            }
+          }
+        }
+
+        // Also check for explicit Progress: lines (backup method)
         if (output.includes('Progress:')) {
           const match = output.match(/Progress:\s*(\d+)%/);
           if (match) {
             const leanProgress = parseInt(match[1], 10);
-            // Map LEAN's 0-100 to our 50-90 range
             const mappedProgress = 50 + (leanProgress * 0.4);
             onProgress(mappedProgress).catch(() => {});
           }
