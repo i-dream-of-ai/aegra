@@ -1430,6 +1430,11 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       });
     };
 
+    // TEMPORARY: Disable real-time streaming due to LEAN Docker assembly bug
+    // The System.Private.ServiceModel.dll in recent LEAN images is corrupted,
+    // causing StreamingMessageHandler to crash. Disable streaming until fixed.
+    // TODO: Re-enable once LEAN fixes their Docker builds
+    // See: https://github.com/QuantConnect/Lean/issues/XXXX
     const result = await runLeanBacktest(
       projectId,
       files,
@@ -1439,7 +1444,7 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       cash,
       parameters,
       updateProgress,
-      onChartUpdate  // Enable real-time chart streaming
+      undefined  // Streaming disabled - onChartUpdate would enable it
     );
 
     const leanDurationSeconds = (Date.now() - leanStartTime) / 1000;
