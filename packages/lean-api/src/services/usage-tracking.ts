@@ -328,3 +328,139 @@ export async function linkOptimizationToUsage(
     [optimizationId, usageTrackingId]
   );
 }
+
+/**
+ * Clean up orphaned "running" records on service startup.
+ * These are records from jobs that were running when the service crashed/restarted.
+ * Also kills any orphaned Docker containers.
+ */
+export async function cleanupOrphanedJobs(): Promise<number> {
+  // First, get all "running" records to check their containers
+  const runningJobs = await query<{
+    id: string;
+    container_id: string | null;
+    started_at: Date;
+    backtest_id: string | null;
+    optimization_id: string | null;
+  }>(
+    `SELECT id, container_id, started_at, backtest_id, optimization_id
+     FROM usage_tracking
+     WHERE status = 'running'`
+  );
+
+  let cleanedCount = 0;
+
+  for (const job of runningJobs) {
+    let containerRunning = false;
+
+    // Check if the Docker container is actually running
+    if (job.container_id) {
+      try {
+        const { stdout } = await execAsync(
+          `docker inspect -f '{{.State.Running}}' ${job.container_id} 2>/dev/null || echo "false"`,
+          { timeout: 5000 }
+        );
+        containerRunning = stdout.trim() === 'true';
+
+        // If container exists but job is too old (>30 min), kill it
+        if (containerRunning && job.started_at) {
+          const ageMinutes = (Date.now() - new Date(job.started_at).getTime()) / 60000;
+          if (ageMinutes > 30) {
+            console.log(`[Usage Cleanup] Killing stale container ${job.container_id} (${ageMinutes.toFixed(0)} min old)`);
+            await execAsync(`docker kill ${job.container_id}`, { timeout: 10000 }).catch(() => {});
+            containerRunning = false;
+          }
+        }
+      } catch {
+        // Container doesn't exist or can't be inspected
+        containerRunning = false;
+      }
+    }
+
+    // If container is not running, mark the job as aborted
+    if (!containerRunning) {
+      const ageMinutes = job.started_at
+        ? (Date.now() - new Date(job.started_at).getTime()) / 60000
+        : 0;
+
+      console.log(
+        `[Usage Cleanup] Aborting orphaned job ${job.id} ` +
+        `(backtest: ${job.backtest_id || 'N/A'}, optimization: ${job.optimization_id || 'N/A'}, ` +
+        `age: ${ageMinutes.toFixed(0)} min, container: ${job.container_id || 'none'})`
+      );
+
+      await execute(
+        `UPDATE usage_tracking SET
+          status = 'aborted',
+          completed_at = NOW(),
+          error_message = 'Orphaned job cleaned up on service restart'
+        WHERE id = $1`,
+        [job.id]
+      );
+
+      cleanedCount++;
+    }
+  }
+
+  if (cleanedCount > 0) {
+    console.log(`[Usage Cleanup] Cleaned up ${cleanedCount} orphaned jobs`);
+  }
+
+  return cleanedCount;
+}
+
+/**
+ * Abort stale jobs that have been running too long.
+ * Call this periodically to catch jobs that got stuck.
+ * @param maxAgeMinutes - Max age in minutes before a job is considered stale (default 30)
+ */
+export async function abortStaleJobs(maxAgeMinutes: number = 30): Promise<number> {
+  const result = await execute(
+    `UPDATE usage_tracking SET
+      status = 'aborted',
+      completed_at = NOW(),
+      error_message = $2
+    WHERE status = 'running'
+      AND started_at < NOW() - ($1 || ' minutes')::interval
+    RETURNING id`,
+    [maxAgeMinutes, `Job exceeded ${maxAgeMinutes} minute timeout`]
+  );
+
+  // execute doesn't return rows, so we need to count separately
+  const countResult = await queryOne<{ count: number }>(
+    `SELECT COUNT(*)::int as count FROM usage_tracking
+     WHERE status = 'aborted'
+       AND error_message LIKE 'Job exceeded % minute timeout'
+       AND completed_at > NOW() - INTERVAL '1 minute'`
+  );
+
+  const abortedCount = countResult?.count || 0;
+  if (abortedCount > 0) {
+    console.log(`[Usage Cleanup] Aborted ${abortedCount} stale jobs (>${maxAgeMinutes} min)`);
+  }
+
+  return abortedCount;
+}
+
+/**
+ * Start periodic cleanup of stale jobs.
+ * Returns a cleanup function to stop the interval.
+ */
+export function startPeriodicCleanup(intervalMinutes: number = 5): () => void {
+  const intervalMs = intervalMinutes * 60 * 1000;
+
+  const cleanup = async () => {
+    try {
+      await abortStaleJobs(30); // 30 min timeout
+    } catch (error) {
+      console.error('[Usage Cleanup] Periodic cleanup error:', error);
+    }
+  };
+
+  const intervalId = setInterval(cleanup, intervalMs);
+
+  // Run once immediately
+  cleanup();
+
+  return () => clearInterval(intervalId);
+}

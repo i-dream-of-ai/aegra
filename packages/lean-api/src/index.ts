@@ -20,6 +20,7 @@ import { checkHealth, closePool } from './services/database.js';
 import { closeQueues } from './workers/queue.js';
 import { startBacktestWorker } from './workers/backtest-worker.js';
 import { startOptimizationWorker } from './workers/optimization-worker.js';
+import { cleanupOrphanedJobs, startPeriodicCleanup } from './services/usage-tracking.js';
 
 // Routes
 import projectsRouter from './routes/projects.js';
@@ -115,6 +116,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 // Start server
 let backtestWorker: Awaited<ReturnType<typeof startBacktestWorker>> | null = null;
 let optimizationWorker: ReturnType<typeof startOptimizationWorker> | null = null;
+let stopPeriodicCleanup: (() => void) | null = null;
 
 async function start() {
   // Log env status on startup
@@ -130,6 +132,23 @@ async function start() {
       process.exit(1);
     }
     console.log('✓ Database connected');
+
+    // Clean up any orphaned jobs from previous crashes/restarts
+    try {
+      const cleanedCount = await cleanupOrphanedJobs();
+      if (cleanedCount > 0) {
+        console.log(`✓ Cleaned up ${cleanedCount} orphaned jobs`);
+      } else {
+        console.log('✓ No orphaned jobs to clean up');
+      }
+    } catch (cleanupError) {
+      // Non-fatal: log and continue
+      console.warn('[Startup] Failed to clean up orphaned jobs:', cleanupError);
+    }
+
+    // Start periodic cleanup (every 5 minutes, aborts jobs running >30 min)
+    stopPeriodicCleanup = startPeriodicCleanup(5);
+    console.log('✓ Periodic job cleanup started (every 5 min)');
 
     // Start background workers
     if (process.env.ENABLE_WORKERS !== 'false') {
@@ -156,6 +175,12 @@ async function shutdown(signal: string) {
   console.log(`\n${signal} received, shutting down gracefully...`);
 
   try {
+    // Stop periodic cleanup first
+    if (stopPeriodicCleanup) {
+      stopPeriodicCleanup();
+      console.log('✓ Periodic cleanup stopped');
+    }
+
     if (backtestWorker) {
       await backtestWorker.close();
       console.log('✓ Backtest worker stopped');
