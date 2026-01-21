@@ -23,9 +23,14 @@ jobs:
             git reset --hard origin/main
             git clean -fd -e .env
 
-            # Rebuild and restart all services (aegra + lean-api + redis)
-            docker compose build --no-cache
-            docker compose up -d
+            # Force remove old images to ensure fresh build
+            # This prevents any BuildKit caching issues
+            docker compose down
+            docker rmi aegra-core-lean-api aegra-core-aegra 2>/dev/null || true
+
+            # Rebuild with no cache and force recreate containers
+            DOCKER_BUILDKIT=0 docker compose build --no-cache --pull
+            docker compose up -d --force-recreate
 
             # Verify containers are running
             sleep 10
