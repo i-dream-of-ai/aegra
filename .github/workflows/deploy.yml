@@ -23,13 +23,13 @@ jobs:
             git reset --hard origin/main
             git clean -fd -e .env
 
-            # Force remove old images to ensure fresh build
-            # This prevents any BuildKit caching issues
+            # Stop containers and remove only our app images (not base images like node:20-alpine or quantconnect/lean)
+            # This ensures fresh code without re-downloading large base images
             docker compose down
             docker rmi aegra-core-lean-api aegra-core-aegra 2>/dev/null || true
 
-            # Rebuild with no cache and force recreate containers
-            DOCKER_BUILDKIT=0 docker compose build --no-cache --pull
+            # Rebuild without BuildKit cache (but keep base image cache)
+            DOCKER_BUILDKIT=0 docker compose build --no-cache
             docker compose up -d --force-recreate
 
             # Verify containers are running
