@@ -359,8 +359,8 @@ def create_run_config(
     # Ensure a configurable section exists
     cfg.setdefault("configurable", {})
 
-    # Set recursion limit (max steps per run) - default to 60
-    cfg.setdefault("recursion_limit", 60)
+    # Set recursion limit (max steps per run) - default to 300
+    cfg.setdefault("recursion_limit", 300)
 
     # Merge server-provided fields (do NOT overwrite if client already set)
     cfg["configurable"].setdefault("thread_id", thread_id)

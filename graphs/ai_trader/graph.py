@@ -34,6 +34,7 @@ from langchain.agents.middleware import (
     TodoListMiddleware,
     ContextEditingMiddleware,
     ClearToolUsesEdit,
+    ModelCallLimitMiddleware,
 )
 # Import deepagents middleware (but not create_deep_agent - we use create_agent directly)
 from deepagents.middleware.subagents import SubAgentMiddleware
@@ -524,9 +525,12 @@ _inner_agent = create_agent(
         build_system_prompt,
         # Custom: Patch dangling tool calls AND orphan tool results
         patch_dangling_tool_calls,
+        # ModelCallLimitMiddleware - gracefully end instead of throwing GraphRecursionError
+        # exit_behavior="end" tells the agent to wrap up gracefully when limit is reached
+        ModelCallLimitMiddleware(run_limit=250, exit_behavior="end"),
     ],
     name="agent",
-).with_config({"recursion_limit": 100})
+).with_config({"recursion_limit": 300})
 
 
 # =============================================================================
