@@ -684,9 +684,9 @@ async function getUserBrokerageCredentials(userId: string): Promise<BrokerageCre
   }
 
   try {
-    // Try Alpaca first (most common)
+    // Fetch all credentials, then find the best Alpaca one
     const response = await fetch(
-      `${mainAppUrl}/api/internal/user-credentials?userId=${encodeURIComponent(userId)}&provider=alpaca`,
+      `${mainAppUrl}/api/internal/user-credentials?userId=${encodeURIComponent(userId)}`,
       { headers: { Authorization: `Bearer ${apiSecret}` } }
     );
 
@@ -695,16 +695,22 @@ async function getUserBrokerageCredentials(userId: string): Promise<BrokerageCre
       return null;
     }
 
-    const data = await response.json() as { credentials?: Array<{ apiKey: string; apiSecret: string }> };
+    const data = await response.json() as { credentials?: Array<{ provider: string; apiKey: string; apiSecret: string }> };
 
     if (data.credentials && data.credentials.length > 0) {
-      const cred = data.credentials[0];
-      console.log(`[Backtest Worker] Found Alpaca credentials for user ${userId}`);
-      return {
-        provider: 'alpaca',
-        apiKey: cred.apiKey,
-        apiSecret: cred.apiSecret,
-      };
+      // Accept any Alpaca variant - paper keys work fine for historical data
+      const alpacaCred = data.credentials.find(c =>
+        c.provider === 'alpaca' || c.provider === 'alpaca_paper'
+      );
+
+      if (alpacaCred && alpacaCred.apiKey && alpacaCred.apiSecret) {
+        console.log(`[Backtest Worker] Found ${alpacaCred.provider} credentials for user ${userId}`);
+        return {
+          provider: 'alpaca',
+          apiKey: alpacaCred.apiKey,
+          apiSecret: alpacaCred.apiSecret,
+        };
+      }
     }
 
     // Could add IB fallback here in the future
