@@ -526,7 +526,7 @@ _inner_agent = create_agent(
         patch_dangling_tool_calls,
     ],
     name="agent",
-).with_config({"recursion_limit": 1000})
+).with_config({"recursion_limit": 60})
 
 
 # =============================================================================
