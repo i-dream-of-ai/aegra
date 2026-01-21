@@ -660,19 +660,79 @@ async function ensureLeanStaticData(): Promise<void> {
   }
 }
 
+// ============================================================================
+// BROKERAGE CREDENTIALS
+// ============================================================================
+
+interface BrokerageCredentials {
+  provider: 'alpaca' | 'interactive_brokers';
+  apiKey: string;
+  apiSecret: string;
+}
+
+/**
+ * Fetch user's brokerage credentials from the main app.
+ * Users MUST connect a broker before running backtests (data licensing requirement).
+ */
+async function getUserBrokerageCredentials(userId: string): Promise<BrokerageCredentials | null> {
+  const mainAppUrl = process.env.MAIN_APP_URL || 'http://localhost:3000';
+  const apiSecret = process.env.LEAN_API_SECRET;
+
+  if (!apiSecret) {
+    console.warn('[Backtest Worker] LEAN_API_SECRET not configured, cannot fetch user credentials');
+    return null;
+  }
+
+  try {
+    // Try Alpaca first (most common)
+    const response = await fetch(
+      `${mainAppUrl}/api/internal/user-credentials?userId=${encodeURIComponent(userId)}&provider=alpaca`,
+      { headers: { Authorization: `Bearer ${apiSecret}` } }
+    );
+
+    if (!response.ok) {
+      console.error(`[Backtest Worker] Failed to fetch user credentials: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as { credentials?: Array<{ apiKey: string; apiSecret: string }> };
+
+    if (data.credentials && data.credentials.length > 0) {
+      const cred = data.credentials[0];
+      console.log(`[Backtest Worker] Found Alpaca credentials for user ${userId}`);
+      return {
+        provider: 'alpaca',
+        apiKey: cred.apiKey,
+        apiSecret: cred.apiSecret,
+      };
+    }
+
+    // Could add IB fallback here in the future
+    return null;
+  } catch (err) {
+    console.error('[Backtest Worker] Error fetching user credentials:', err);
+    return null;
+  }
+}
+
 /**
  * Create LEAN config.json for the backtest
  * Parameters are passed to LEAN and can be accessed via self.get_parameter() in the algorithm
  *
  * When streamingPort is provided, LEAN will use StreamingMessageHandler to push
  * real-time chart updates via ZeroMQ on that port.
+ *
+ * When brokerageCredentials is provided, LEAN will use DownloaderDataProvider to
+ * fetch data directly from the user's brokerage (Alpaca, IB, etc.) for licensing compliance.
  */
+
 function createLeanConfig(
   startDate: Date,
   endDate: Date,
   cash: number,
   parameters: Record<string, unknown> = {},
-  streamingPort?: number
+  streamingPort?: number,
+  brokerageCredentials?: BrokerageCredentials
 ): object {
   // Note: These paths are INSIDE the Docker container, not host paths
   // The Docker volumes map:
@@ -700,7 +760,6 @@ function createLeanConfig(
     // These files are placed in /Data/equity/usa/map_files/ and /Data/equity/usa/factor_files/
     'map-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider',
     'factor-file-provider': 'QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider',
-    'data-provider': 'QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider',
     'alpha-handler': 'QuantConnect.Lean.Engine.Alphas.DefaultAlphaHandler',
     'data-channel-provider': 'DataChannelProvider',
     'log-handler': 'QuantConnect.Logging.CompositeLogHandler',
@@ -710,6 +769,30 @@ function createLeanConfig(
     'end-date': endDate.toISOString().split('T')[0],
     'cash-amount': cash,
   };
+
+  // Configure data provider based on whether brokerage credentials are provided
+  // When credentials are provided, LEAN fetches data directly from the brokerage
+  // This is required for data licensing compliance - users must use their own data
+  if (brokerageCredentials) {
+    config['data-provider'] = 'QuantConnect.Lean.Engine.DataFeeds.DownloaderDataProvider';
+    config['data-downloader'] = 'BrokerageDataDownloader';
+
+    if (brokerageCredentials.provider === 'alpaca') {
+      config['data-downloader-brokerage'] = 'AlpacaBrokerage';
+      config['alpaca-api-key'] = brokerageCredentials.apiKey;
+      config['alpaca-api-secret'] = brokerageCredentials.apiSecret;
+      config['alpaca-paper-trading'] = true; // Use paper for data only
+    } else if (brokerageCredentials.provider === 'interactive_brokers') {
+      config['data-downloader-brokerage'] = 'InteractiveBrokersBrokerage';
+      config['ib-user-name'] = brokerageCredentials.apiKey;
+      config['ib-password'] = brokerageCredentials.apiSecret;
+      // IB requires additional config that user would need to provide
+    }
+  } else {
+    // Fallback: use local data files (pre-cached)
+    // This is only for development/testing - production requires user credentials
+    config['data-provider'] = 'QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider';
+  }
 
   // Configure messaging handler based on whether streaming is enabled
   if (streamingPort) {
@@ -924,7 +1007,8 @@ async function runLeanBacktest(
   parameters: Record<string, unknown>,
   onProgress: (progress: number) => Promise<void>,
   onChartUpdate?: OnChartUpdate,
-  userId?: string
+  userId?: string,
+  brokerageCredentials?: BrokerageCredentials
 ): Promise<{
   success: boolean;
   error?: string;
@@ -970,18 +1054,22 @@ async function runLeanBacktest(
 
     await onProgress(20);
 
-    // Ensure market data is cached from provider (Alpha Vantage, Alpaca, etc.)
-    // Uses user's own API keys for data licensing compliance
-    console.log(`[LEAN Data] Ensuring market data in DB for symbols: ${symbols.join(', ')} (user: ${userId || 'platform'})`);
-    await ensureMultipleSymbolsCached(symbols, startDate, endDate, userId, 'alpaca');
+    // When brokerageCredentials is provided, LEAN fetches data directly from the brokerage
+    // This is the correct approach for data licensing - users use their own data
+    if (brokerageCredentials) {
+      console.log(`[LEAN Data] LEAN will fetch data directly from ${brokerageCredentials.provider}`);
+      // LEAN handles data fetching internally via DownloaderDataProvider
+      // We just need static data (symbol-properties, market-hours) which ensureLeanStaticData handles
+    } else {
+      // Fallback: use our cached data (development/testing only)
+      console.log(`[LEAN Data] Using cached data for symbols: ${symbols.join(', ')}`);
+      await ensureMultipleSymbolsCached(symbols, startDate, endDate, userId, 'alpaca');
 
-    await onProgress(30);
-
-    // Ensure LEAN-format data exists in persistent cache
-    // Production-grade: checks date range coverage, only regenerates/extends if needed
-    for (const symbol of symbols) {
-      const bars = await getDailyBars(symbol, startDate, endDate);
-      await ensureSymbolInCache(symbol, bars, startDate, endDate);
+      // Export to LEAN format
+      for (const symbol of symbols) {
+        const bars = await getDailyBars(symbol, startDate, endDate);
+        await ensureSymbolInCache(symbol, bars, startDate, endDate);
+      }
     }
 
     await onProgress(40);
@@ -1001,8 +1089,12 @@ async function runLeanBacktest(
 
     // Create LEAN config (uses container paths, not host paths)
     // Parameters are injected here and accessible via self.get_parameter() in the algorithm
-    // Pass streaming port to enable StreamingMessageHandler
-    const config = createLeanConfig(startDate, endDate, cash, parameters, streamingPort || undefined);
+    // Pass streaming port for chart updates, and brokerage credentials for data fetching
+    const config = createLeanConfig(
+      startDate, endDate, cash, parameters,
+      streamingPort || undefined,
+      brokerageCredentials
+    );
     const configPath = path.join(tempBase, 'config.json');
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 
@@ -1450,6 +1542,14 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       await markUsageRunning(usageTrackingId).catch(() => {});
     }
 
+    // CRITICAL: Users must connect a broker for data licensing compliance
+    // LEAN will fetch data directly from their brokerage
+    const brokerageCredentials = await getUserBrokerageCredentials(userId);
+    if (!brokerageCredentials) {
+      throw new Error('BROKER_NOT_CONNECTED: Please connect a broker (e.g., Alpaca) in Settings → API Keys before running backtests. This is required for market data access.');
+    }
+    console.log(`[Backtest Worker] Using ${brokerageCredentials.provider} for market data`);
+
     // Get algorithm files
     const files = await query<LeanFile>(
       'SELECT * FROM project_files WHERE project_id = $1',
@@ -1473,21 +1573,13 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
 
     await updateProgress(5);
 
-    // Ensure market data is cached for the algorithm's date range
-    // Uses user's own API keys (Alpaca/Alpha Vantage) for data licensing compliance
-    if (symbols.length > 0) {
-      console.log(`[Backtest Worker] Caching market data for user ${userId}...`);
-      const dataResult = await ensureMultipleSymbolsCached(
-        symbols,
-        dataStartDate,
-        dataEndDate,
-        userId,      // Pass userId to use their API keys
-        'alpaca'     // Prefer Alpaca (free unlimited data)
-      );
-      // Track data points fetched (estimate based on symbols * days)
-      const days = Math.ceil((dataEndDate.getTime() - dataStartDate.getTime()) / (1000 * 60 * 60 * 24));
-      dataPointsFetched = symbols.length * days;
-    }
+    // LEAN fetches data directly from user's brokerage via DownloaderDataProvider
+    // No need to pre-cache data - this is handled by createLeanConfig with brokerageCredentials
+    console.log(`[Backtest Worker] LEAN will fetch data from ${brokerageCredentials.provider} for symbols: ${symbols.join(', ') || '(none)'}`);
+
+    // Estimate data points for tracking (symbols * days)
+    const days = Math.ceil((dataEndDate.getTime() - dataStartDate.getTime()) / (1000 * 60 * 60 * 24));
+    dataPointsFetched = symbols.length * days;
 
     await updateProgress(10);
 
@@ -1519,8 +1611,9 @@ async function processBacktest(job: Job<BacktestJobData>): Promise<void> {
       cash,
       parameters,
       updateProgress,
-      onChartUpdate,  // Enable chart streaming via file polling
-      userId          // Pass userId for their API keys
+      onChartUpdate,        // Enable chart streaming via file polling
+      userId,               // Pass userId for tracking
+      brokerageCredentials  // Pass brokerage credentials for LEAN to fetch data
     );
 
     const leanDurationSeconds = (Date.now() - leanStartTime) / 1000;
