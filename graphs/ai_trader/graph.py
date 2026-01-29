@@ -58,6 +58,7 @@ from graphs.ai_trader.tools.files import TOOLS as FILES_TOOLS
 from graphs.ai_trader.tools.misc import TOOLS as MISC_TOOLS
 from graphs.ai_trader.tools.object_store import TOOLS as OBJECT_STORE_TOOLS
 from graphs.ai_trader.tools.optimization import TOOLS as OPTIMIZATION_TOOLS
+from graphs.ai_trader.tools.web_search import TOOLS as WEB_SEARCH_TOOLS
 # Import reviewer prompt for subagent configuration
 from graphs.ai_trader.prompts import DEFAULT_REVIEWER_PROMPT
 
@@ -73,6 +74,7 @@ ALL_TOOLS = (
     + OBJECT_STORE_TOOLS
     + AI_SERVICES_TOOLS
     + MISC_TOOLS
+    + WEB_SEARCH_TOOLS
 )
 
 

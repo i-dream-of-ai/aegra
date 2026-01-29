@@ -85,6 +85,9 @@ from .optimization import (
     update_optimization,
 )
 
+# Web Search
+from .web_search import web_search
+
 # Review (Doubtful Deacon) - Now handled by SubAgentMiddleware's task() tool
 # The "code-reviewer" subagent is configured in graph.py
 
@@ -141,5 +144,7 @@ __all__ = [
     "read_project_nodes",
     "update_project_nodes",
     "read_lean_versions",
+    # Web Search (1)
+    "web_search",
     # Review - handled by "code-reviewer" subagent via task() tool
 ]
