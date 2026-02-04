@@ -1,7 +1,6 @@
 """FastAPI application for Aegra (Agent Protocol Server)"""
 
 import asyncio
-import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -29,11 +28,14 @@ from starlette.middleware import Middleware
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.routing import Mount, Route
 
+from src.agent_server.settings import settings
+
 from .api.assistants import router as assistants_router
 from .api.config import router as config_router
 from .api.runs import router as runs_router
 from .api.store import router as store_router
 from .api.threads import router as threads_router
+from .api.ui import router as ui_router
 from .config import HttpConfig, load_http_config
 from .core.app_loader import load_custom_app
 from .core.auth_middleware import get_auth_backend, on_auth_error
@@ -126,7 +128,11 @@ exception_handlers = {
 # Define shadowable routes (can be overridden by custom routes)
 async def root_handler() -> dict[str, str]:
     """Root endpoint"""
-    return {"message": "Aegra", "version": "0.1.0", "status": "running"}
+    return {
+        "message": settings.app.PROJECT_NAME,
+        "version": settings.app.VERSION,
+        "status": "running",
+    }
 
 
 # Extract routes from health router - these are already Starlette-compatible
@@ -148,7 +154,7 @@ unshadowable_routes = unshadowable_health_routes
 # Create protected routes mount (core API routes)
 # Extract routes from routers for the mount
 protected_routes = []
-for router in [assistants_router, threads_router, runs_router, store_router]:
+for router in [assistants_router, threads_router, runs_router, store_router, ui_router]:
     protected_routes.extend(router.routes)
 
 protected_mount = Mount(
@@ -240,9 +246,10 @@ if user_app:
 else:
     # Standard Aegra app without custom routes
     app = FastAPI(
-        title="Aegra",
+        title=settings.app.PROJECT_NAME,
         description="Production-ready Agent Protocol server built on LangGraph",
-        version="0.1.0",
+        version=settings.app.VERSION,
+        debug=settings.app.DEBUG,
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
@@ -285,6 +292,7 @@ else:
     app.include_router(runs_router, prefix="", tags=["Runs"])
     app.include_router(store_router, prefix="", tags=["Store"])
     app.include_router(config_router, prefix="", tags=["Config"])
+    app.include_router(ui_router, prefix="", tags=["UI"])
 
     # Add exception handlers
     for exc_type, handler in exception_handlers.items():
@@ -294,11 +302,15 @@ else:
     @app.get("/")
     async def root() -> dict[str, str]:
         """Root endpoint"""
-        return {"message": "Aegra", "version": "0.1.0", "status": "running"}
+        return {
+            "message": settings.app.PROJECT_NAME,
+            "version": settings.app.VERSION,
+            "status": "running",
+        }
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)  # nosec B104 - binding to all interfaces is intentional
+    port = int(settings.app.PORT)
+    uvicorn.run(app, host=settings.app.HOST, port=port)  # nosec B104 - binding to all interfaces is intentional
