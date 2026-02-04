@@ -12,13 +12,15 @@
       "allow_origins": [
         "https://ai-trader-saas.vercel.app",
         "https://www.ai-trader-saas.vercel.app",
+        "https://ledgai.com",
+        "https://www.ledgai.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000"
       ],
       "allow_credentials": true,
       "allow_methods": ["*"],
       "allow_headers": ["*"],
-      "expose_headers": ["X-Request-ID"]
+      "expose_headers": ["X-Request-ID", "Content-Location", "Location"]
     }
   },
   "auth": {
