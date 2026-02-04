@@ -534,23 +534,15 @@ _inner_agent = create_agent(
 # =============================================================================
 
 
-async def agent_node(state: AITraderState, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Wrapper node that invokes the inner agent.
-
-    This node simply delegates to the inner agent created by create_agent.
-    The agent handles all tool calls, model invocations, and response generation.
-    """
-    # Invoke the inner agent - it handles its own loop
-    result = await _inner_agent.ainvoke(state, context=context)
-    return result
-
-
 # Build the wrapper graph: START -> subconscious -> agent -> END
 _builder = StateGraph(AITraderState)
 
 # Add nodes
 _builder.add_node("subconscious", subconscious_node)
-_builder.add_node("agent", agent_node)
+# Add inner agent as a proper subgraph - this ensures checkpoints from the agent's
+# iterations are saved to the parent checkpointer, so messages are preserved even
+# if GraphRecursionError occurs
+_builder.add_node("agent", _inner_agent)
 
 # Add edges
 _builder.add_edge(START, "subconscious")
