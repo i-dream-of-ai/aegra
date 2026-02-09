@@ -44,6 +44,7 @@ async def synthesize_context(
     user_intent: str,
     conversation_context: str,
     use_llm: bool = True,
+    user_id: str | None = None,
 ) -> InjectionResult:
     """
     Synthesize retrieved skills into actionable context.
@@ -76,7 +77,7 @@ async def synthesize_context(
 
     # Use LLM for more complex synthesis
     try:
-        return await _llm_synthesis(skills, user_intent, conversation_context)
+        return await _llm_synthesis(skills, user_intent, conversation_context, user_id=user_id)
     except Exception as e:
         logger.warning("LLM synthesis failed, using template fallback", error=str(e))
         return _template_synthesis(skills)
@@ -108,6 +109,7 @@ async def _llm_synthesis(
     skills: list[RetrievedSkill],
     user_intent: str,
     conversation_context: str,
+    user_id: str | None = None,
 ) -> InjectionResult:
     """LLM-based synthesis for complex cases."""
     model = ChatAnthropic(
@@ -143,6 +145,22 @@ Synthesize the most relevant skills into actionable context. Output JSON."""
             ],
             config={"callbacks": []},
         )
+
+        # Fire-and-forget cost logging
+        if user_id:
+            try:
+                from agent_server.services.ai_cost_service import extract_usage_from_response, log_ai_cost
+                usage = extract_usage_from_response(response)
+                if usage["input_tokens"] or usage["output_tokens"]:
+                    log_ai_cost(
+                        user_id=user_id,
+                        model="claude-haiku-4-5-20251001",
+                        input_tokens=usage["input_tokens"],
+                        output_tokens=usage["output_tokens"],
+                        call_source="subconscious:synthesizer",
+                    )
+            except Exception:
+                pass
 
         # Parse JSON response
         content = response.content

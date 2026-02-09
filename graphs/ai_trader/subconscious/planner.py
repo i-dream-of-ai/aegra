@@ -49,6 +49,7 @@ Keep queries specific and actionable. Max 5 keyword queries, max 3 semantic quer
 async def generate_retrieval_plan(
     messages: list[dict],
     recent_context: str,
+    user_id: str | None = None,
 ) -> RetrievalPlan:
     """
     Analyze conversation and generate retrieval queries.
@@ -103,6 +104,22 @@ Output JSON with user_intent, keyword_queries, and semantic_queries."""
             ],
             config={"callbacks": []},
         )
+
+        # Fire-and-forget cost logging
+        if user_id:
+            try:
+                from agent_server.services.ai_cost_service import extract_usage_from_response, log_ai_cost
+                usage = extract_usage_from_response(response)
+                if usage["input_tokens"] or usage["output_tokens"]:
+                    log_ai_cost(
+                        user_id=user_id,
+                        model="claude-haiku-4-5-20251001",
+                        input_tokens=usage["input_tokens"],
+                        output_tokens=usage["output_tokens"],
+                        call_source="subconscious:planner",
+                    )
+            except Exception:
+                pass
 
         # Parse JSON response
         content = response.content

@@ -113,6 +113,7 @@ async def subconscious_node(
             messages=list(messages),
             access_token=access_token,
             current_turn=0,  # Always 0 since this runs once at start
+            user_id=ctx.get("user_id"),
         )
 
         duration_ms = int((time.time() - start_time) * 1000)

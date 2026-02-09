@@ -187,7 +187,34 @@ async def dynamic_model_selection(
         request = request.override(messages=sanitized_messages)
 
     logger.info("Dynamic model selection", model=model_name, model_type=type(model).__name__)
-    return await handler(request.override(model=model))
+    response = await handler(request.override(model=model))
+
+    # Fire-and-forget cost logging
+    try:
+        from agent_server.services.ai_cost_service import extract_usage_from_response, log_ai_cost
+        user_id = ctx.get("user_id")
+        if user_id and response.messages:
+            last_msg = response.messages[-1]
+            usage = extract_usage_from_response(last_msg)
+            if usage["input_tokens"] or usage["output_tokens"]:
+                config = getattr(request.runtime, "config", {}) or {}
+                log_ai_cost(
+                    user_id=user_id,
+                    model=model_name,
+                    input_tokens=usage["input_tokens"],
+                    output_tokens=usage["output_tokens"],
+                    call_source="agent:main",
+                    thinking_tokens=usage["thinking_tokens"],
+                    cache_read_tokens=usage["cache_read_tokens"],
+                    cache_creation_tokens=usage["cache_creation_tokens"],
+                    run_id=config.get("run_id"),
+                    thread_id=config.get("thread_id"),
+                    project_id=ctx.get("project_db_id"),
+                )
+    except Exception as e:
+        logger.debug("Cost logging failed (non-blocking)", error=str(e))
+
+    return response
 
 
 # =============================================================================
@@ -381,7 +408,34 @@ async def reviewer_dynamic_model_selection(
         request = request.override(messages=sanitized_messages)
 
     logger.info("Reviewer dynamic model selection", model=model_name, model_type=type(model).__name__)
-    return await handler(request.override(model=model))
+    response = await handler(request.override(model=model))
+
+    # Fire-and-forget cost logging
+    try:
+        from agent_server.services.ai_cost_service import extract_usage_from_response, log_ai_cost
+        user_id = ctx.get("user_id")
+        if user_id and response.messages:
+            last_msg = response.messages[-1]
+            usage = extract_usage_from_response(last_msg)
+            if usage["input_tokens"] or usage["output_tokens"]:
+                config = getattr(request.runtime, "config", {}) or {}
+                log_ai_cost(
+                    user_id=user_id,
+                    model=model_name,
+                    input_tokens=usage["input_tokens"],
+                    output_tokens=usage["output_tokens"],
+                    call_source="agent:reviewer",
+                    thinking_tokens=usage["thinking_tokens"],
+                    cache_read_tokens=usage["cache_read_tokens"],
+                    cache_creation_tokens=usage["cache_creation_tokens"],
+                    run_id=config.get("run_id"),
+                    thread_id=config.get("thread_id"),
+                    project_id=ctx.get("project_db_id"),
+                )
+    except Exception as e:
+        logger.debug("Cost logging failed (non-blocking)", error=str(e))
+
+    return response
 
 
 # =============================================================================

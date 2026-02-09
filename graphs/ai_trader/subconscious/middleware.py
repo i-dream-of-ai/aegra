@@ -72,6 +72,7 @@ class SubconsciousMiddleware:
         access_token: str,
         current_turn: int = 0,
         thread_id: str | None = None,
+        user_id: str | None = None,
     ) -> str | None:
         """
         Process messages and return context to inject.
@@ -110,6 +111,7 @@ class SubconsciousMiddleware:
             plan = await generate_retrieval_plan(
                 messages=self._messages_to_dicts(messages),
                 recent_context=conversation_context,
+                user_id=user_id,
             )
 
             if plan.skip_reason:
@@ -145,6 +147,7 @@ class SubconsciousMiddleware:
                 user_intent=plan.user_intent,
                 conversation_context=conversation_context,
                 use_llm=len(unique_skills) > 2,
+                user_id=user_id,
             )
 
             # Update state
