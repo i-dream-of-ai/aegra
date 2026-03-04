@@ -512,20 +512,19 @@ subagents = [REVIEWER_SUBAGENT]
 subagent_middleware = [
     TodoListMiddleware(),
     # ContextEditingMiddleware - prunes old tool outputs before summarization
-    # Triggers at 120k tokens, keeps last 3 tool results, replaces rest with [cleared]
+    # Triggers at 100k tokens, keeps last 5 tool results, replaces rest with [cleared]
     ContextEditingMiddleware(edits=[
-        ClearToolUsesEdit(trigger=120000, keep=3, placeholder="[output cleared]"),
+        ClearToolUsesEdit(trigger=100000, keep=5, placeholder="[output cleared]"),
     ]),
-    # SummarizationMiddleware - only trigger when really needed (150k tokens)
-    # This is ~75% of Claude's 200k context, giving headroom before hitting limits
-    # For smaller models (128k), context editing at 120k should keep us safe
+    # SummarizationMiddleware - triggers at 160k tokens
+    # After summarization, keeps ~60k tokens of recent context (~100k headroom).
+    # Token-based keep prevents re-triggering after a single agent turn.
     SummarizationMiddleware(
         model="openai:gpt-5-mini",
-        trigger=("tokens", 150000),
-        keep=("messages", 6),
+        trigger=("tokens", 160000),
+        keep=("tokens", 60000),
         trim_tokens_to_summarize=50000,
     ),
-    # Note: AnthropicPromptCachingMiddleware removed - conflicts with OpenAI summarization model
 ]
 
 # Create the inner agent using create_agent directly (not create_deep_agent)
@@ -560,21 +559,20 @@ _inner_agent = create_agent(
             general_purpose_agent=True,
         ),
         # ContextEditingMiddleware - prunes old tool outputs to save tokens
-        # Triggers at 120k tokens, keeps last 3 tool results, replaces rest with [cleared]
+        # Triggers at 100k tokens, keeps last 5 tool results, replaces rest with [cleared]
         # Runs BEFORE summarization to reduce context size first
         ContextEditingMiddleware(edits=[
-            ClearToolUsesEdit(trigger=120000, keep=3, placeholder="[output cleared]"),
+            ClearToolUsesEdit(trigger=100000, keep=5, placeholder="[output cleared]"),
         ]),
-        # SummarizationMiddleware - only trigger when really needed (150k tokens)
-        # This is ~75% of Claude's 200k context, giving headroom before hitting limits
-        # For smaller models (128k), context editing at 120k should keep us safe
+        # SummarizationMiddleware - triggers at 160k tokens
+        # After summarization, keeps ~60k tokens of recent context (~100k headroom).
+        # Token-based keep prevents re-triggering after a single agent turn.
         SummarizationMiddleware(
             model="openai:gpt-5-mini",
-            trigger=("tokens", 150000),
-            keep=("messages", 6),
+            trigger=("tokens", 160000),
+            keep=("tokens", 60000),
             trim_tokens_to_summarize=50000,
         ),
-        # Note: AnthropicPromptCachingMiddleware removed - conflicts with OpenAI summarization model
         # Custom: Dynamic model selection from context
         dynamic_model_selection,
         # Custom: Dynamic system prompt with subconscious context from state
