@@ -27,6 +27,10 @@ jobs:
             docker compose build --no-cache aegra
             docker compose up -d aegra
 
+            # Clean up old images and build cache to prevent disk filling up
+            docker image prune -af
+            docker builder prune -af
+
             # Verify container is running
             sleep 5
             docker compose ps aegra
