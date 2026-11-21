@@ -3,12 +3,12 @@
 import json
 import os
 
-from langchain.tools import tool, ToolRuntime
+from langchain.tools import ToolRuntime, tool
 from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
-from ..qc_api import qc_request
 from ..optimization_ranking import rank_trials
+from ..qc_api import qc_request
 
 
 @tool
@@ -225,11 +225,18 @@ async def read_optimization(
 
         opt = result.get("optimization", {})
         if isinstance(opt, str):
-             return json.dumps({"error": True, "message": f"Unexpected API response: optimization field is a string ({opt}). Check ID."})
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"Unexpected API response: optimization field is a string ({opt}). Check ID.",
+                }
+            )
 
         if not result.get("success", True):
             raise ValueError("QuantConnect could not read the optimization")
-        if opt.get("projectId") is not None and str(opt["projectId"]) != str(qc_project_id):
+        if opt.get("projectId") is not None and str(opt["projectId"]) != str(
+            qc_project_id
+        ):
             raise ValueError("Optimization belongs to another project")
         rows, count, criterion = rank_trials(opt)
         page_size = max(1, min(50, page_size))
@@ -237,8 +244,10 @@ async def read_optimization(
         total_pages = max(1, (total + page_size - 1) // page_size)
         page = max(1, min(page, total_pages))
         start = (page - 1) * page_size
-        results = rows[start:start + page_size]
-        best = rows[0] if rows and str(opt.get("status")).lower() == "completed" else None
+        results = rows[start : start + page_size]
+        best = (
+            rows[0] if rows and str(opt.get("status")).lower() == "completed" else None
+        )
         runtime_stats = opt.get("runtimeStatistics") or {}
         ui_data = {
             "optimizationId": optimization_id,
@@ -249,15 +258,22 @@ async def read_optimization(
             "bestResult": best,
             "runtimeStatistics": runtime_stats,
             "pagination": {
-                "currentPage": page, "pageSize": page_size, "totalResults": total,
-                "totalPages": total_pages, "hasMorePages": page < total_pages,
-                "showing": f"{start + 1}–{start + len(results)} of {total}" if total else "0",
+                "currentPage": page,
+                "pageSize": page_size,
+                "totalResults": total,
+                "totalPages": total_pages,
+                "hasMorePages": page < total_pages,
+                "showing": f"{start + 1}–{start + len(results)} of {total}"
+                if total
+                else "0",
             },
             "backtestResults": results,
         }
 
         # Emit optimization results UI component via generative UI (linked to tool call message)
-        push_ui_message("optimization-results", ui_data, message={"id": runtime.tool_call_id})
+        push_ui_message(
+            "optimization-results", ui_data, message={"id": runtime.tool_call_id}
+        )
 
         return json.dumps(
             {
@@ -278,7 +294,6 @@ async def read_optimization(
                     "has_more_pages": page < total_pages,
                 },
                 "results": results,
-
             },
             indent=2,
         )

@@ -1,7 +1,7 @@
 """Normalize QuantConnect optimization statistics and rank completed trials."""
 
-from math import isfinite
 import operator
+from math import isfinite
 
 # The cloud wire format uses percentage points for these display statistics.
 METRICS = {
@@ -13,10 +13,20 @@ METRICS = {
     "TotalNumberOfTrades": (17, "Total Orders"),
     "WinRate": (20, "Win Rate"),
 }
-ALIASES = {"cagr": "CompoundingAnnualReturn", "maxdrawdown": "Drawdown",
-           "netprofit": "TotalNetProfit", "totaltrades": "TotalNumberOfTrades"}
-OPERATORS = {"Less": operator.lt, "LessOrEqual": operator.le, "Greater": operator.gt,
-             "GreaterOrEqual": operator.ge, "Equals": operator.eq, "NotEqual": operator.ne}
+ALIASES = {
+    "cagr": "CompoundingAnnualReturn",
+    "maxdrawdown": "Drawdown",
+    "netprofit": "TotalNetProfit",
+    "totaltrades": "TotalNumberOfTrades",
+}
+OPERATORS = {
+    "Less": operator.lt,
+    "LessOrEqual": operator.le,
+    "Greater": operator.gt,
+    "GreaterOrEqual": operator.ge,
+    "Equals": operator.eq,
+    "NotEqual": operator.ne,
+}
 
 
 def number(value):
@@ -29,7 +39,9 @@ def number(value):
 
 def metric_name(target):
     key = str(target).split(".")[-1].replace(" ", "").lower()
-    return ALIASES.get(key) or next((name for name in METRICS if name.lower() == key), None)
+    return ALIASES.get(key) or next(
+        (name for name in METRICS if name.lower() == key), None
+    )
 
 
 def statistic(stats, metric):
@@ -61,7 +73,9 @@ def rank_trials(opt):
     direction = criterion.get("extremum") or opt.get("extremum")
     metric = metric_name(target)
     if not metric or direction not in ("min", "max"):
-        raise ValueError("Cannot rank trials without a supported objective and min/max direction")
+        raise ValueError(
+            "Cannot rank trials without a supported objective and min/max direction"
+        )
     trials = opt.get("backtests") or []
     if isinstance(trials, dict):
         trials = [dict(row, id=row.get("id") or key) for key, row in trials.items()]
@@ -69,19 +83,31 @@ def rank_trials(opt):
     for trial in trials:
         stats = trial.get("statistics") or {}
         score = statistic(stats, metric)
-        if metric in ("SharpeRatio", "ProbabilisticSharpeRatio") and statistic(stats, "TotalNumberOfTrades") == 0:
+        if (
+            metric in ("SharpeRatio", "ProbabilisticSharpeRatio")
+            and statistic(stats, "TotalNumberOfTrades") == 0
+        ):
             continue
-        if (score is None or number(trial.get("exitCode")) != 0
-                or number(trial.get("progress", 1)) != 1):
+        if (
+            score is None
+            or number(trial.get("exitCode")) != 0
+            or number(trial.get("progress", 1)) != 1
+        ):
             continue
         if not all(meets_constraint(stats, c) for c in (opt.get("constraints") or [])):
             continue
-        rows.append({
-            "backtestId": trial.get("id"), "name": trial.get("name"),
-            "parameterSet": trial.get("parameterSet", trial.get("parameters", {})),
-            "score": score, "statistics": {label: statistic(stats, name)
-                                           for name, (_, label) in METRICS.items()},
-        })
+        rows.append(
+            {
+                "backtestId": trial.get("id"),
+                "name": trial.get("name"),
+                "parameterSet": trial.get("parameterSet", trial.get("parameters", {})),
+                "score": score,
+                "statistics": {
+                    label: statistic(stats, name)
+                    for name, (_, label) in METRICS.items()
+                },
+            }
+        )
     rows.sort(key=lambda row: row["score"], reverse=direction == "max")
     for rank, row in enumerate(rows, 1):
         row["rank"] = rank
