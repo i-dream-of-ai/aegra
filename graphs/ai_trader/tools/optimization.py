@@ -8,6 +8,7 @@ from langgraph.graph.ui import push_ui_message
 
 from ..context import Context
 from ..qc_api import qc_request
+from ..optimization_ranking import rank_trials
 
 
 @tool
@@ -210,41 +211,6 @@ async def read_optimization(
         page: Page number (default: 1)
         page_size: Results per page (default: 20, max: 50)
     """
-    # QC statistics indices (from their docs):
-    # [0]=alpha, [1]=annual std dev, [2]=annual variance, [3]=avg loss%, [4]=avg win%,
-    # [5]=beta, [6]=cagr%, [7]=drawdown%, [8]=estimated capacity, [9]=expectancy,
-    # [10]=info ratio, [11]=loss rate%, [12]=net profit%, [13]=probabilistic sharpe,
-    # [14]=profit-loss ratio, [15]=sharpe ratio, [16]=total fees, [17]=total orders,
-    # [18]=tracking error, [19]=treynor ratio, [20]=win rate%
-    # NOTE: QC returns stats as a dict with string keys ("0", "1", etc.), not a list!
-    STAT_INDICES = {
-        "alpha": "0",
-        "annual_std_dev": "1",
-        "cagr": "6",
-        "drawdown": "7",
-        "net_profit": "12",
-        "sharpe_ratio": "15",
-        "total_trades": "17",
-        "win_rate": "20",
-    }
-    
-    def get_stat(stats_obj, key):
-        """Extract a statistic from the QC stats dict/list."""
-        if not stats_obj:
-            return None
-        idx = STAT_INDICES.get(key)
-        if idx is None:
-            return None
-        # QC returns dict with string keys like {"0": 0.123, "1": 0.456, ...}
-        if isinstance(stats_obj, dict):
-            return stats_obj.get(idx) or stats_obj.get(int(idx))
-        # Fallback: handle as list (just in case)
-        if isinstance(stats_obj, list):
-            int_idx = int(idx)
-            if int_idx < len(stats_obj):
-                return stats_obj[int_idx]
-        return None
-    
     try:
         qc_project_id = runtime.context.get("qc_project_id")
 
@@ -261,89 +227,35 @@ async def read_optimization(
         if isinstance(opt, str):
              return json.dumps({"error": True, "message": f"Unexpected API response: optimization field is a string ({opt}). Check ID."})
 
-        # backtests can be dict (keyed by id) or list - normalize to list
-        backtests_raw = opt.get("backtests", {})
-        if isinstance(backtests_raw, dict):
-            all_backtests = list(backtests_raw.values())
-        elif isinstance(backtests_raw, list):
-            all_backtests = backtests_raw
-        else:
-            all_backtests = []
-
-        # Sort by Sharpe ratio using get_stat helper
-        def get_sharpe(bt):
-            stats = bt.get("statistics", {})
-            val = get_stat(stats, "sharpe_ratio")
-            return float(val or 0)
-        
-        sorted_bt = sorted(all_backtests, key=get_sharpe, reverse=True)
-
-        total = len(sorted_bt)
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+        if not result.get("success", True):
+            raise ValueError("QuantConnect could not read the optimization")
+        if opt.get("projectId") is not None and str(opt["projectId"]) != str(qc_project_id):
+            raise ValueError("Optimization belongs to another project")
+        rows, count, criterion = rank_trials(opt)
+        page_size = max(1, min(50, page_size))
+        total = len(rows)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
         start = (page - 1) * page_size
-        end = start + page_size
-        page_results = sorted_bt[start:end]
-
-        # Format results - get_stat handles both dict and list formats
-        results = []
-        for i, bt in enumerate(page_results):
-            stats = bt.get("statistics", {})
-            params = bt.get("parameterSet", bt.get("parameters", {}))
-            
-            net_profit = get_stat(stats, 'net_profit')
-            cagr = get_stat(stats, 'cagr')
-            sharpe = get_stat(stats, 'sharpe_ratio')
-            drawdown = get_stat(stats, 'drawdown')
-            win_rate = get_stat(stats, 'win_rate')
-            
-            results.append({
-                "rank": start + i + 1,
-                "parameters": params,
-                "net_profit": f"{net_profit:.2f}%" if net_profit is not None else None,
-                "cagr": f"{cagr:.2f}%" if cagr is not None else None,
-                "sharpe_ratio": f"{sharpe:.3f}" if sharpe is not None else None,
-                "max_drawdown": f"{drawdown:.2f}%" if drawdown is not None else None,
-                "win_rate": f"{win_rate:.2f}%" if win_rate is not None else None,
-            })
-
-        # Best result
-        best = None
-        if sorted_bt:
-            best_bt = sorted_bt[0]
-            best_stats = best_bt.get("statistics", [])
-            best_params = best_bt.get("parameterSet", best_bt.get("parameters", {}))
-            
-            net_profit = get_stat(best_stats, 'net_profit')
-            cagr = get_stat(best_stats, 'cagr')
-            sharpe = get_stat(best_stats, 'sharpe_ratio')
-            
-            best = {
-                "parameters": best_params,
-                "net_profit": f"{net_profit:.2f}%" if net_profit is not None else None,
-                "cagr": f"{cagr:.2f}%" if cagr is not None else None,
-                "sharpe_ratio": f"{sharpe:.3f}" if sharpe is not None else None,
-            }
-
-        # Runtime stats from QC
-        runtime_stats = opt.get("runtimeStatistics", {})
-
-        # Build UI-friendly data structure
+        results = rows[start:start + page_size]
+        best = rows[0] if rows and str(opt.get("status")).lower() == "completed" else None
+        runtime_stats = opt.get("runtimeStatistics") or {}
         ui_data = {
             "optimizationId": optimization_id,
             "name": opt.get("name", "Unknown"),
             "status": opt.get("status", "Unknown"),
-            "progress": runtime_stats.get("Completed", "0") + "/" + runtime_stats.get("Total", "0"),
+            "criterion": criterion,
+            "totalBacktestCount": count,
             "bestResult": best,
+            "runtimeStatistics": runtime_stats,
             "pagination": {
-                "currentPage": page,
-                "pageSize": page_size,
-                "totalResults": total,
-                "totalPages": total_pages,
-                "hasMorePages": page < total_pages,
+                "currentPage": page, "pageSize": page_size, "totalResults": total,
+                "totalPages": total_pages, "hasMorePages": page < total_pages,
+                "showing": f"{start + 1}–{start + len(results)} of {total}" if total else "0",
             },
-            "results": results,
+            "backtestResults": results,
         }
-        
+
         # Emit optimization results UI component via generative UI (linked to tool call message)
         push_ui_message("optimization-results", ui_data, message={"id": runtime.tool_call_id})
 
@@ -355,6 +267,8 @@ async def read_optimization(
                 "completed": runtime_stats.get("Completed", "0"),
                 "total": runtime_stats.get("Total", "0"),
                 "failed": runtime_stats.get("Failed", "0"),
+                "criterion": criterion,
+                "excluded_or_unfinished": count - total,
                 "best_result": best,
                 "pagination": {
                     "current_page": page,
